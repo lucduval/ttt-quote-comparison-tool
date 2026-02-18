@@ -102,6 +102,19 @@ Produce your output as valid JSON with this exact structure:
 Here is the extracted data from the quotes:
 `;
 
+function sanitizeJson(raw: string): string {
+  // Replace literal control characters inside JSON string values.
+  // JSON.parse rejects unescaped control chars (U+0000–U+001F) inside strings.
+  return raw.replace(/[\u0000-\u001F\u007F]/g, (ch) => {
+    switch (ch) {
+      case "\n": return "\\n";
+      case "\r": return "\\r";
+      case "\t": return "\\t";
+      default:   return "";
+    }
+  });
+}
+
 async function generateWithRetry(
   fn: () => Promise<unknown>,
   maxRetries = 4,
@@ -205,7 +218,7 @@ export const processQuotes = action({
           );
         }
 
-        const extractedData = JSON.parse(jsonMatch[0]);
+        const extractedData = JSON.parse(sanitizeJson(jsonMatch[0]));
         extractedDataArray.push({
           fileName: doc.fileName,
           data: extractedData,
@@ -230,7 +243,7 @@ export const processQuotes = action({
         throw new Error("Failed to generate comparison");
       }
 
-      const result = JSON.parse(comparisonJsonMatch[0]);
+      const result = JSON.parse(sanitizeJson(comparisonJsonMatch[0]));
 
       await ctx.runMutation(api.comparisons.storeResult, {
         id: args.comparisonId,
