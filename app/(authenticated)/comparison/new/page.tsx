@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useMutation, useAction, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -32,7 +32,7 @@ const INSURANCE_TYPES = [
   { value: "other", label: "Other" },
 ];
 
-export default function NewComparisonPage() {
+function NewComparisonContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -270,5 +270,13 @@ export default function NewComparisonPage() {
         </Card>
       )}
     </div>
+  );
+}
+
+export default function NewComparisonPage() {
+  return (
+    <Suspense>
+      <NewComparisonContent />
+    </Suspense>
   );
 }
