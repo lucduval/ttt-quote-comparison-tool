@@ -159,7 +159,10 @@ export const processQuotes = action({
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.0-flash",
+      generationConfig: { responseMimeType: "application/json" },
+    });
 
     try {
       await ctx.runMutation(api.comparisons.updateStatus, {
@@ -212,14 +215,12 @@ export const processQuotes = action({
         )) as Awaited<ReturnType<typeof model.generateContent>>;
 
         const extractionText = extractionResult.response.text();
-        const jsonMatch = extractionText.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-          throw new Error(
-            `Failed to extract data from ${doc.fileName}`
-          );
+        const jsonSource = extractionText.match(/\{[\s\S]*\}/)?.[0] ?? extractionText;
+        if (!jsonSource.trim()) {
+          throw new Error(`Failed to extract data from ${doc.fileName}`);
         }
 
-        const extractedData = JSON.parse(sanitizeJson(jsonMatch[0]));
+        const extractedData = JSON.parse(sanitizeJson(jsonSource));
         extractedDataArray.push({
           fileName: doc.fileName,
           data: extractedData,
@@ -238,13 +239,12 @@ export const processQuotes = action({
         model.generateContent(comparisonInput)
       )) as Awaited<ReturnType<typeof model.generateContent>>;
       const comparisonText = comparisonResult.response.text();
-      const comparisonJsonMatch = comparisonText.match(/\{[\s\S]*\}/);
-
-      if (!comparisonJsonMatch) {
+      const comparisonJsonSource = comparisonText.match(/\{[\s\S]*\}/)?.[0] ?? comparisonText;
+      if (!comparisonJsonSource.trim()) {
         throw new Error("Failed to generate comparison");
       }
 
-      const result = JSON.parse(sanitizeJson(comparisonJsonMatch[0]));
+      const result = JSON.parse(sanitizeJson(comparisonJsonSource));
 
       await ctx.runMutation(api.comparisons.storeResult, {
         id: args.comparisonId,
