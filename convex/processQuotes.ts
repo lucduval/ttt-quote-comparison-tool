@@ -103,16 +103,11 @@ Here is the extracted data from the quotes:
 `;
 
 function sanitizeJson(raw: string): string {
-  // Replace literal control characters inside JSON string values.
-  // JSON.parse rejects unescaped control chars (U+0000–U+001F) inside strings.
-  return raw.replace(/[\u0000-\u001F\u007F]/g, (ch) => {
-    switch (ch) {
-      case "\n": return "\\n";
-      case "\r": return "\\r";
-      case "\t": return "\\t";
-      default:   return "";
-    }
-  });
+  // Strip control characters that are never valid in JSON outside of string
+  // values. DO NOT convert \n → \\n — that turns structural whitespace into an
+  // invalid token and causes "Expected property name or '}'" at position 1.
+  // With JSON mode enabled, the model already escapes string-internal newlines.
+  return raw.replace(/[\u0000-\u001F\u007F]/g, "");
 }
 
 async function generateWithRetry(
