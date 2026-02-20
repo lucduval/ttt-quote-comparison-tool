@@ -46,6 +46,7 @@ export default defineSchema({
     comparisonId: v.id("comparisons"),
     fileName: v.string(),
     storageId: v.id("_storage"),
+    mimeType: v.optional(v.string()),
     insurerName: v.optional(v.string()),
     extractedData: v.optional(v.any()),
   }).index("by_comparison", ["comparisonId"]),

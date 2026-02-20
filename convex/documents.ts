@@ -28,12 +28,14 @@ export const addDocument = mutation({
     comparisonId: v.id("comparisons"),
     fileName: v.string(),
     storageId: v.id("_storage"),
+    mimeType: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert("documents", {
       comparisonId: args.comparisonId,
       fileName: args.fileName,
       storageId: args.storageId,
+      mimeType: args.mimeType,
     });
   },
 });

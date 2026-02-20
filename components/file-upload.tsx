@@ -23,6 +23,14 @@ interface FileUploadProps {
   disabled?: boolean;
 }
 
+const ACCEPTED_TYPES = [
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+];
+
 export function FileUpload({
   comparisonId,
   onFilesReady,
@@ -69,6 +77,7 @@ export function FileUpload({
           comparisonId,
           fileName: uploadedFile.file.name,
           storageId,
+          mimeType: uploadedFile.file.type || "application/pdf",
         });
 
         setFiles((prev) =>
@@ -100,8 +109,8 @@ export function FileUpload({
 
   const handleFiles = useCallback(
     async (newFiles: FileList) => {
-      const pdfFiles = Array.from(newFiles).filter(
-        (f) => f.type === "application/pdf"
+      const pdfFiles = Array.from(newFiles).filter((f) =>
+        ACCEPTED_TYPES.includes(f.type)
       );
 
       if (pdfFiles.length === 0) return;
@@ -169,7 +178,7 @@ export function FileUpload({
           if (disabled) return;
           const input = document.createElement("input");
           input.type = "file";
-          input.accept = "application/pdf";
+          input.accept = "application/pdf,image/png,image/jpeg,image/webp";
           input.multiple = true;
           input.onchange = (e) => {
             const files = (e.target as HTMLInputElement).files;
@@ -182,10 +191,10 @@ export function FileUpload({
         <p className="text-sm font-medium">
           {disabled
             ? "Select a contact first"
-            : "Drag and drop PDF files here"}
+            : "Drag and drop quote files here"}
         </p>
         <p className="text-xs text-muted-foreground mt-1">
-          {disabled ? "" : "or click to browse. Upload at least 2 quote PDFs."}
+          {disabled ? "" : "or click to browse. PDFs and images accepted. Upload at least 2 quotes."}
         </p>
       </div>
 
@@ -225,7 +234,7 @@ export function FileUpload({
           ))}
           {files.length < 2 && (
             <p className="text-xs text-muted-foreground">
-              Upload at least 2 PDF files to compare.
+              Upload at least 2 quote files to compare.
             </p>
           )}
           {allComplete && (

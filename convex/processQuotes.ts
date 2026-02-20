@@ -203,7 +203,8 @@ export const processQuotes = action({
             EXTRACTION_PROMPT,
             {
               inlineData: {
-                mimeType: "application/pdf",
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                mimeType: (doc.mimeType ?? "application/pdf") as any,
                 data: base64Data,
               },
             },
