@@ -87,6 +87,7 @@ export const storeResult = mutation({
       coverComparison: v.any(),
       excessComparison: v.any(),
       conditionsDifferences: v.any(),
+      shortfalls: v.optional(v.any()),
       recommendation: v.string(),
       emailDraft: v.string(),
     }),

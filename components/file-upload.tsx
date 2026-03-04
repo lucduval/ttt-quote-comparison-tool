@@ -21,6 +21,10 @@ interface FileUploadProps {
   comparisonId: Id<"comparisons"> | null;
   onFilesReady: (storageIds: Id<"_storage">[]) => void;
   disabled?: boolean;
+  role?: "current_policy" | "new_quote";
+  maxFiles?: number;
+  label?: string;
+  hint?: string;
 }
 
 const ACCEPTED_TYPES = [
@@ -35,6 +39,10 @@ export function FileUpload({
   comparisonId,
   onFilesReady,
   disabled,
+  role,
+  maxFiles,
+  label,
+  hint,
 }: FileUploadProps) {
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -78,6 +86,7 @@ export function FileUpload({
           fileName: uploadedFile.file.name,
           storageId,
           mimeType: uploadedFile.file.type || "application/pdf",
+          documentRole: role,
         });
 
         setFiles((prev) =>
@@ -104,7 +113,7 @@ export function FileUpload({
         return null;
       }
     },
-    [comparisonId, generateUploadUrl, addDocument]
+    [comparisonId, generateUploadUrl, addDocument, role]
   );
 
   const handleFiles = useCallback(
@@ -115,7 +124,12 @@ export function FileUpload({
 
       if (pdfFiles.length === 0) return;
 
-      const newUploadedFiles: UploadedFile[] = pdfFiles.map((file) => ({
+      // Enforce maxFiles limit
+      const remaining = maxFiles ? maxFiles - files.length : pdfFiles.length;
+      const filesToAdd = pdfFiles.slice(0, remaining);
+      if (filesToAdd.length === 0) return;
+
+      const newUploadedFiles: UploadedFile[] = filesToAdd.map((file) => ({
         file,
         progress: 0,
         status: "pending" as const,
@@ -137,9 +151,14 @@ export function FileUpload({
           .map((f) => f.storageId as Id<"_storage">),
         ...validIds,
       ];
+
+      // Remove successfully uploaded files from local state — they will appear
+      // in the "Previously uploaded" list pulled from the database.
+      setFiles((prev) => prev.filter((f) => f.status !== "complete"));
+
       onFilesReady(allStorageIds);
     },
-    [files, comparisonId, uploadFile, onFilesReady]
+    [files, comparisonId, uploadFile, onFilesReady, maxFiles]
   );
 
   const handleDrop = useCallback(
@@ -156,33 +175,41 @@ export function FileUpload({
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const allComplete = files.length >= 2 && files.every((f) => f.status === "complete");
+  const atMaxFiles = maxFiles !== undefined && files.length >= maxFiles;
+  const isDropDisabled = disabled || atMaxFiles;
+
+  const dropLabel = label ?? "Drag and drop quote files here";
+  const dropHint =
+    hint ??
+    (maxFiles === 1
+      ? "or click to browse. PDF or image accepted."
+      : "or click to browse. PDFs and images accepted.");
 
   return (
     <div className="space-y-4">
       <div
         onDragOver={(e) => {
           e.preventDefault();
-          if (!disabled) setIsDragging(true);
+          if (!isDropDisabled) setIsDragging(true);
         }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
         className={`relative flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-colors ${
           isDragging
             ? "border-primary bg-primary/5"
-            : disabled
+            : isDropDisabled
               ? "border-muted bg-muted/20 cursor-not-allowed"
               : "border-muted-foreground/25 hover:border-primary/50 cursor-pointer"
         }`}
         onClick={() => {
-          if (disabled) return;
+          if (isDropDisabled) return;
           const input = document.createElement("input");
           input.type = "file";
           input.accept = "application/pdf,image/png,image/jpeg,image/webp";
-          input.multiple = true;
+          input.multiple = maxFiles !== 1;
           input.onchange = (e) => {
-            const files = (e.target as HTMLInputElement).files;
-            if (files) handleFiles(files);
+            const selectedFiles = (e.target as HTMLInputElement).files;
+            if (selectedFiles) handleFiles(selectedFiles);
           };
           input.click();
         }}
@@ -191,10 +218,12 @@ export function FileUpload({
         <p className="text-sm font-medium">
           {disabled
             ? "Select a contact first"
-            : "Drag and drop quote files here"}
+            : atMaxFiles
+              ? "File uploaded"
+              : dropLabel}
         </p>
         <p className="text-xs text-muted-foreground mt-1">
-          {disabled ? "" : "or click to browse. PDFs and images accepted. Upload at least 2 quotes."}
+          {!disabled && !atMaxFiles ? dropHint : ""}
         </p>
       </div>
 
@@ -232,16 +261,6 @@ export function FileUpload({
               </CardContent>
             </Card>
           ))}
-          {files.length < 2 && (
-            <p className="text-xs text-muted-foreground">
-              Upload at least 2 quote files to compare.
-            </p>
-          )}
-          {allComplete && (
-            <p className="text-xs text-green-600">
-              All files uploaded. Ready to process.
-            </p>
-          )}
         </div>
       )}
     </div>

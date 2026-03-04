@@ -17,25 +17,53 @@ import {
   AlertTriangle,
   FileWarning,
   ThumbsUp,
+  AlertCircle,
 } from "lucide-react";
+
+interface PremiumItem {
+  insurer: string;
+  role?: string;
+  monthlyPremium: string;
+  annualPremium?: string;
+}
+
+interface CoverFeature {
+  feature: string;
+  values: Record<string, string>;
+}
+
+interface CoverSection {
+  sectionName: string;
+  features: CoverFeature[];
+}
+
+interface ShortfallGap {
+  item: string;
+  section: string;
+  availableIn: string[];
+  details: string;
+}
+
+interface ShortfallRisk {
+  item: string;
+  section: string;
+  currentDetails: string;
+  newQuoteDetails: string;
+}
 
 interface ComparisonResultProps {
   result: {
     summary: string;
     premiumComparison: {
-      items?: Array<{
-        insurer: string;
-        monthlyPremium: string;
-        annualPremium?: string;
-      }>;
+      items?: PremiumItem[];
       difference?: string;
       cheapest?: string;
     };
     coverComparison: {
-      features?: Array<{
-        feature: string;
-        values: Record<string, string>;
-      }>;
+      // New section-based structure
+      sections?: CoverSection[];
+      // Legacy flat structure (backward compat)
+      features?: CoverFeature[];
     };
     excessComparison: {
       insurers?: Record<
@@ -56,6 +84,11 @@ interface ComparisonResultProps {
       insurers?: Record<string, string[]>;
       analysis?: string;
     };
+    shortfalls?: {
+      gapsInCurrentCover?: ShortfallGap[];
+      coverAtRisk?: ShortfallRisk[];
+      analysis?: string;
+    };
     recommendation: string;
   };
 }
@@ -63,6 +96,19 @@ interface ComparisonResultProps {
 export function ComparisonResult({ result }: ComparisonResultProps) {
   const insurerNames =
     result.premiumComparison.items?.map((i) => i.insurer) ?? [];
+
+  // Normalise cover comparison: handle both section-based and legacy flat formats
+  const coverSections: CoverSection[] = result.coverComparison.sections?.length
+    ? result.coverComparison.sections
+    : result.coverComparison.features?.length
+      ? [{ sectionName: "Cover Comparison", features: result.coverComparison.features }]
+      : [];
+
+  const hasShortfalls =
+    result.shortfalls &&
+    ((result.shortfalls.gapsInCurrentCover?.length ?? 0) > 0 ||
+      (result.shortfalls.coverAtRisk?.length ?? 0) > 0 ||
+      !!result.shortfalls.analysis);
 
   return (
     <div className="space-y-6">
@@ -74,6 +120,106 @@ export function ComparisonResult({ result }: ComparisonResultProps) {
           </p>
         </CardContent>
       </Card>
+
+      {/* Shortfalls — shown prominently when a current policy baseline was used */}
+      {hasShortfalls && (
+        <Card className="border-amber-200 dark:border-amber-800">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <AlertCircle className="h-4 w-4 text-amber-500" />
+              Cover Shortfall Analysis
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {/* Gaps: cover in new quotes that client does NOT currently have */}
+            {result.shortfalls!.gapsInCurrentCover &&
+              result.shortfalls!.gapsInCurrentCover.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium">Gaps in Current Cover</p>
+                    <Badge variant="outline" className="text-xs border-amber-400 text-amber-600">
+                      Client currently missing
+                    </Badge>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {result.shortfalls!.gapsInCurrentCover.map((gap, i) => (
+                      <div
+                        key={i}
+                        className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-4 space-y-1"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-medium">{gap.item}</p>
+                          <Badge variant="secondary" className="text-xs shrink-0">
+                            {gap.section}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">{gap.details}</p>
+                        {gap.availableIn?.length > 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            Available in:{" "}
+                            <span className="font-medium">
+                              {gap.availableIn.join(", ")}
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            {/* Cover at risk: current policy has cover that new quote may not */}
+            {result.shortfalls!.coverAtRisk &&
+              result.shortfalls!.coverAtRisk.length > 0 && (
+                <div className="space-y-3">
+                  {result.shortfalls!.gapsInCurrentCover?.length ? (
+                    <Separator />
+                  ) : null}
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium">Cover at Risk</p>
+                    <Badge variant="outline" className="text-xs border-red-400 text-red-600">
+                      May be lost on switch
+                    </Badge>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {result.shortfalls!.coverAtRisk.map((risk, i) => (
+                      <div
+                        key={i}
+                        className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-4 space-y-2"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-medium">{risk.item}</p>
+                          <Badge variant="secondary" className="text-xs shrink-0">
+                            {risk.section}
+                          </Badge>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs text-muted-foreground">
+                            <span className="font-medium">Current: </span>
+                            {risk.currentDetails}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            <span className="font-medium">New quote: </span>
+                            {risk.newQuoteDetails}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            {result.shortfalls!.analysis && (
+              <>
+                <Separator />
+                <p className="text-sm text-muted-foreground">
+                  {result.shortfalls!.analysis}
+                </p>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Premium Comparison */}
       {result.premiumComparison.items &&
@@ -93,7 +239,17 @@ export function ComparisonResult({ result }: ComparisonResultProps) {
                     className="flex items-center justify-between rounded-lg border p-4"
                   >
                     <div>
-                      <p className="text-sm font-medium">{item.insurer}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium">{item.insurer}</p>
+                        {item.role && (
+                          <Badge
+                            variant={item.role === "Current Policy" ? "secondary" : "outline"}
+                            className="text-xs"
+                          >
+                            {item.role}
+                          </Badge>
+                        )}
+                      </div>
                       {item.annualPremium && item.annualPremium !== "N/A" && (
                         <p className="text-xs text-muted-foreground">
                           {item.annualPremium}/year
@@ -123,46 +279,55 @@ export function ComparisonResult({ result }: ComparisonResultProps) {
           </Card>
         )}
 
-      {/* Cover Comparison */}
-      {result.coverComparison.features &&
-        result.coverComparison.features.length > 0 && (
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Shield className="h-4 w-4" />
-                Side-by-Side Cover Comparison
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="min-w-[140px]">Feature</TableHead>
-                      {insurerNames.map((name) => (
-                        <TableHead key={name}>{name}</TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {result.coverComparison.features.map((feature, i) => (
-                      <TableRow key={i}>
-                        <TableCell className="font-medium text-sm">
-                          {feature.feature}
-                        </TableCell>
+      {/* Cover Comparison — section-based */}
+      {coverSections.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Shield className="h-4 w-4" />
+              Side-by-Side Cover Comparison
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {coverSections.map((section, si) => (
+              <div key={si} className="space-y-2">
+                {coverSections.length > 1 && (
+                  <>
+                    {si > 0 && <Separator className="my-2" />}
+                    <p className="text-sm font-semibold pt-1">{section.sectionName}</p>
+                  </>
+                )}
+                <div className="overflow-x-auto">
+                  <Table className="w-full table-fixed">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[180px] whitespace-normal">Feature</TableHead>
                         {insurerNames.map((name) => (
-                          <TableCell key={name} className="text-sm">
-                            {feature.values[name] ?? "—"}
-                          </TableCell>
+                          <TableHead key={name} className="whitespace-normal">{name}</TableHead>
                         ))}
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {section.features.map((feature, i) => (
+                        <TableRow key={i}>
+                          <TableCell className="font-medium text-sm align-top whitespace-normal break-words">
+                            {feature.feature}
+                          </TableCell>
+                          {insurerNames.map((name) => (
+                            <TableCell key={name} className="text-sm align-top whitespace-normal break-words">
+                              {feature.values[name] ?? "—"}
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
-            </CardContent>
-          </Card>
-        )}
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Excess Comparison */}
       {result.excessComparison.insurers && (
@@ -217,32 +382,32 @@ export function ComparisonResult({ result }: ComparisonResultProps) {
                       Example Scenarios
                     </p>
                     <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Scenario</TableHead>
-                          {insurerNames.map((name) => (
-                            <TableHead key={name}>{name}</TableHead>
-                          ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {result.excessComparison.exampleScenarios.map(
-                          (scenario, i) => (
-                            <TableRow key={i}>
-                              <TableCell className="text-sm">
-                                {scenario.scenario}
-                              </TableCell>
-                              {insurerNames.map((name) => (
-                                <TableCell key={name} className="text-sm">
-                                  {scenario.values[name] ?? "—"}
+                      <Table className="w-full table-fixed">
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-[180px] whitespace-normal">Scenario</TableHead>
+                            {insurerNames.map((name) => (
+                              <TableHead key={name} className="whitespace-normal">{name}</TableHead>
+                            ))}
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {result.excessComparison.exampleScenarios.map(
+                            (scenario, i) => (
+                              <TableRow key={i}>
+                                <TableCell className="text-sm align-top whitespace-normal break-words">
+                                  {scenario.scenario}
                                 </TableCell>
-                              ))}
-                            </TableRow>
-                          )
-                        )}
-                      </TableBody>
-                    </Table>
+                                {insurerNames.map((name) => (
+                                  <TableCell key={name} className="text-sm align-top whitespace-normal break-words">
+                                    {scenario.values[name] ?? "—"}
+                                  </TableCell>
+                                ))}
+                              </TableRow>
+                            )
+                          )}
+                        </TableBody>
+                      </Table>
                     </div>
                   </div>
                 </>

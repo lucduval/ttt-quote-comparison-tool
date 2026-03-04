@@ -34,6 +34,7 @@ export default defineSchema({
         coverComparison: v.any(),
         excessComparison: v.any(),
         conditionsDifferences: v.any(),
+        shortfalls: v.optional(v.any()),
         recommendation: v.string(),
         emailDraft: v.string(),
       })
@@ -49,5 +50,6 @@ export default defineSchema({
     mimeType: v.optional(v.string()),
     insurerName: v.optional(v.string()),
     extractedData: v.optional(v.any()),
+    documentRole: v.optional(v.union(v.literal("current_policy"), v.literal("new_quote"))),
   }).index("by_comparison", ["comparisonId"]),
 });

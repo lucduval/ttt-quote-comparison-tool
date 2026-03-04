@@ -1,75 +1,95 @@
 import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api } from "./_generated/api";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI, createUserContent, createPartFromUri } from "@google/genai";
 
-const EXTRACTION_PROMPT = `You are an expert insurance analyst. Analyze this insurance policy document or quote and extract the following information in a structured JSON format.
+const EXTRACTION_PROMPT = `You are an expert South African insurance analyst. Analyze this insurance policy document or quote schedule and extract ALL sections it contains. Personal lines policies typically have multiple sections: Motor, Buildings, Contents, All-Risk/Portable Possessions, Personal Liability, etc. Extract every section present.
 
 Return ONLY valid JSON with this exact structure:
 {
   "insurerName": "string - name of the insurance company",
-  "premium": {
+  "policyNumber": "string or null",
+  "insuredName": "string or null",
+  "effectiveDate": "string or null",
+  "totalPremium": {
     "monthly": number or null,
     "annual": number or null,
-    "currency": "string - e.g. ZAR, USD"
+    "currency": "ZAR"
   },
-  "coverType": "string - e.g. Comprehensive, Third Party Only, Third Party Fire & Theft",
-  "basisOfIndemnity": "string - e.g. Retail Value, Market Value, Agreed Value",
-  "thirdPartyLiability": "string - e.g. R2,500,000",
-  "passengerLiability": "string or null",
-  "sasria": "Included or Excluded",
-  "territorialLimits": "string",
-  "legalCover": "string - Included/Excluded/Not specified",
-  "personalAccident": "string - details or Excluded",
-  "roadsideAssistance": "string - details or Excluded",
-  "lossOfUse": "string - details or Not included",
-  "creditShortfall": "string - details or Not included",
-  "excess": {
-    "type": "string - Fixed or Percentage-based or Mixed",
-    "accident": "string - e.g. R15,000 or 10% min R15,000",
-    "theft": "string",
-    "thirdParty": "string",
-    "windscreen": "string",
-    "actsOfNature": "string or null",
-    "otherExcesses": ["string - any additional excess conditions"],
-    "notes": "string - any important excess notes"
-  },
-  "specialConditions": ["string - list of important conditions, warranties, requirements"],
-  "inclusions": ["string - list of what is included"],
-  "exclusions": ["string - list of what is excluded"],
-  "insuredItem": "string - description of what is insured (e.g. 2016 Hyundai i10)",
-  "policyNumber": "string or null",
-  "additionalNotes": "string - any other relevant information"
+  "sections": [
+    {
+      "sectionName": "string - exact section name as it appears (e.g. Motor, Buildings, Contents, All-Risk, Personal Liability, Accidental Damage)",
+      "sectionType": "motor | buildings | contents | all_risk | liability | other",
+      "insuredItem": "string - what is insured (e.g. 2020 Toyota Corolla, Dwelling at 12 Main St, Contents of home)",
+      "sumInsured": "string or null - insured amount e.g. R500,000",
+      "premium": {
+        "monthly": number or null,
+        "annual": number or null
+      },
+      "basisOfIndemnity": "string or null - e.g. Retail Value, Market Value, Replacement Value, First Loss",
+      "excess": {
+        "standard": "string - the standard/basic excess amount or formula",
+        "special": ["string - any additional or special excess clauses, e.g. driver under 25 excess, theft excess"]
+      },
+      "extensions": [
+        {
+          "name": "string - extension name, e.g. Power Surge, Geyser, Car Hire/Loss of Use, Accidental Damage, Roadside Assistance, SASRIA, Legal Costs, Personal Accident, Credit Shortfall, Towing, Glass, Windscreen",
+          "included": true or false,
+          "limit": "string or null - monetary limit if applicable",
+          "details": "string or null - any relevant details or conditions"
+        }
+      ],
+      "inclusions": ["string - specific items or perils included"],
+      "exclusions": ["string - specific exclusions for this section"],
+      "specialConditions": ["string - warranties, requirements, endorsements"]
+    }
+  ],
+  "sasria": "Included or Excluded or Not specified",
+  "additionalNotes": "string - any other relevant policy-wide information"
 }
 
-If a field cannot be determined from the document, use null.`;
+IMPORTANT INSTRUCTIONS:
+- Extract EVERY section in the document, not just motor
+- For Contents sections: explicitly check for and list Power Surge cover as an extension (included true/false with limit)
+- For All-Risk sections: list each scheduled item with its insured value
+- For Motor sections: check for Car Hire/Loss of Use, Roadside Assistance, Windscreen, Credit Shortfall as extensions
+- Capture ALL excess amounts accurately - read each line carefully, excess structures are often complex
+- If a field cannot be determined from the document, use null
+- Do not invent information - only extract what is explicitly stated`;
 
-const COMPARISON_PROMPT = `You are an expert insurance broker analyst. You have been provided with extracted data from multiple insurance quotes/policies for the same client.
+const COMPARISON_PROMPT = `You are an expert South African insurance broker analyst. You have been provided with extracted data from insurance documents for the same client.
 
-Your task is to produce a comprehensive, professional comparison that:
-1. Helps the client make an informed decision
-2. Meets all compliance requirements for insurance advice
-3. Clearly highlights key differentiators
+One document may be labelled [CURRENT POLICY] — this is the client's existing cover and serves as the baseline. All others are labelled [NEW QUOTE] and represent alternative options being considered.
+
+If no [CURRENT POLICY] is present, treat all documents as quotes being compared side-by-side.
+
+Your task is to produce a comprehensive, professional, compliance-aware comparison.
 
 Produce your output as valid JSON with this exact structure:
 {
-  "summary": "A brief 2-3 sentence summary of the comparison",
+  "summary": "A brief 2-3 sentence summary of the comparison, mentioning whether a current policy baseline was provided",
   "premiumComparison": {
     "items": [
       {
         "insurer": "string",
+        "role": "Current Policy or New Quote",
         "monthlyPremium": "string - formatted amount",
         "annualPremium": "string - formatted amount or N/A"
       }
     ],
-    "difference": "string - plain language description of cost difference",
+    "difference": "string - plain language description of cost difference vs current policy (or between quotes if no current policy)",
     "cheapest": "string - insurer name"
   },
   "coverComparison": {
-    "features": [
+    "sections": [
       {
-        "feature": "string - feature name",
-        "values": { "insurerName": "string - value for this insurer" }
+        "sectionName": "string - e.g. Motor, Contents, Buildings, All-Risk",
+        "features": [
+          {
+            "feature": "string - feature or extension name",
+            "values": { "insurerName": "string - value or Included/Excluded/Not specified" }
+          }
+        ]
       }
     ]
   },
@@ -77,17 +97,36 @@ Produce your output as valid JSON with this exact structure:
     "insurers": {
       "insurerName": {
         "type": "string",
-        "details": ["string - excess detail lines"],
+        "details": ["string - excess detail lines per section"],
         "notes": "string"
       }
     },
     "exampleScenarios": [
       {
-        "scenario": "string - description",
+        "scenario": "string - description e.g. Motor accident claim, Contents theft claim",
         "values": { "insurerName": "string - excess amount" }
       }
     ],
     "analysis": "string - professional analysis of excess structures"
+  },
+  "shortfalls": {
+    "gapsInCurrentCover": [
+      {
+        "item": "string - cover/extension name",
+        "section": "string - which policy section e.g. Contents, Motor",
+        "availableIn": ["string - insurer names that offer this"],
+        "details": "string - brief explanation of what the client is missing"
+      }
+    ],
+    "coverAtRisk": [
+      {
+        "item": "string - cover/extension name",
+        "section": "string - which policy section",
+        "currentDetails": "string - what the current policy provides",
+        "newQuoteDetails": "string - what the new quote provides or does not provide"
+      }
+    ],
+    "analysis": "string - professional summary of shortfalls and risks"
   },
   "conditionsDifferences": {
     "insurers": {
@@ -95,11 +134,17 @@ Produce your output as valid JSON with this exact structure:
     },
     "analysis": "string - professional analysis of conditions"
   },
-  "recommendation": "string - detailed professional recommendation with reasoning. Include scenarios for different client priorities (cost vs risk). Be balanced and compliant.",
-  "emailDraft": "string - a complete, professional email ready to send to the client. Use markdown formatting: **bold** for emphasis, markdown tables (| Header | Header |) for comparisons, bullet lists with - for details, and ### headings for sections. Include proper greeting (use Dear [Client Name]), the full comparison details, the recommendation, and a professional closing. This should be comprehensive enough to serve as the record of advice."
+  "recommendation": "string - detailed professional recommendation with reasoning. If comparing against a current policy, reference it explicitly. Include scenarios for different client priorities (cost vs risk). Be balanced and compliant.",
+  "emailDraft": "string - a complete, professional email ready to send to the client. Use markdown formatting: **bold** for emphasis, markdown tables (| Header | Header |) for comparisons, bullet lists with - for details, and ### headings for sections. Include proper greeting (use Dear [Client Name]), the full comparison details including any shortfalls identified, the recommendation, and a professional closing. This should be comprehensive enough to serve as the record of advice."
 }
 
-Here is the extracted data from the quotes:
+IMPORTANT: The shortfalls section is CRITICAL. If a current policy is provided:
+- gapsInCurrentCover = cover that exists in new quotes but the client does NOT currently have (e.g. Power Surge if current policy excludes it)
+- coverAtRisk = cover the client currently has that is NOT present or is reduced in the new quote options
+
+If no current policy is provided, set shortfalls.gapsInCurrentCover and shortfalls.coverAtRisk to empty arrays and use the analysis field to note that no current policy baseline was available.
+
+Here is the extracted data from the documents:
 `;
 
 function sanitizeJson(raw: string): string {
@@ -119,16 +164,20 @@ async function generateWithRetry(
     try {
       return await fn();
     } catch (error: unknown) {
-      const is429 =
+      const msg = error instanceof Error ? error.message.toLowerCase() : "";
+      const isRetryable =
         error instanceof Error &&
-        (error.message.includes("429") ||
-          error.message.toLowerCase().includes("resource exhausted") ||
-          error.message.toLowerCase().includes("too many requests"));
+        (msg.includes("429") ||
+          msg.includes("503") ||
+          msg.includes("resource exhausted") ||
+          msg.includes("too many requests") ||
+          msg.includes("unavailable") ||
+          msg.includes("service unavailable"));
 
-      if (is429 && attempt < maxRetries) {
+      if (isRetryable && attempt < maxRetries) {
         const delay = baseDelayMs * Math.pow(2, attempt);
         console.log(
-          `Rate limit hit, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`
+          `Transient error, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})...`
         );
         await new Promise((resolve) => setTimeout(resolve, delay));
       } else {
@@ -153,11 +202,7 @@ export const processQuotes = action({
       throw new Error("GEMINI_API_KEY not configured");
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
-      generationConfig: { responseMimeType: "application/json" },
-    });
+    const ai = new GoogleGenAI({ apiKey });
 
     try {
       await ctx.runMutation(api.comparisons.updateStatus, {
@@ -169,60 +214,87 @@ export const processQuotes = action({
         comparisonId: args.comparisonId,
       });
 
-      if (documents.length < 2) {
-        throw new Error("At least 2 documents are required for comparison");
+      const newQuotes = documents.filter((d) => d.documentRole !== "current_policy");
+      const currentPolicy = documents.find((d) => d.documentRole === "current_policy");
+
+      // Need at least 1 new quote. If no current policy, need at least 2 documents total.
+      if (newQuotes.length < 1 || (!currentPolicy && documents.length < 2)) {
+        throw new Error(
+          "Upload at least 2 new quotes, or 1 current policy schedule + 1 new quote"
+        );
       }
 
-      // Step 1: Extract data from each PDF
-      const extractedDataArray: Array<{ fileName: string; data: unknown }> = [];
+      // Phase 1: Fetch all files and upload to Gemini Files API in parallel.
+      // This replaces the sequential fetch+btoa approach, eliminating the 3s
+      // delays between documents and supporting files up to 2GB.
+      const uploadedFiles = await Promise.all(
+        documents.map(async (doc) => {
+          const fileUrl = await ctx.storage.getUrl(doc.storageId);
+          if (!fileUrl) throw new Error(`Could not get URL for file: ${doc.fileName}`);
 
-      for (let i = 0; i < documents.length; i++) {
-        if (i > 0) {
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-        }
-        const doc = documents[i];
-        const fileUrl = await ctx.storage.getUrl(doc.storageId);
-        if (!fileUrl) {
-          throw new Error(`Could not get URL for file: ${doc.fileName}`);
-        }
+          const response = await fetch(fileUrl);
+          const arrayBuffer = await response.arrayBuffer();
+          const mimeType = doc.mimeType ?? "application/pdf";
 
-        const response = await fetch(fileUrl);
-        const arrayBuffer = await response.arrayBuffer();
-        const bytes = new Uint8Array(arrayBuffer);
-        const chunkSize = 32768;
-        const chunks: string[] = [];
-        for (let i = 0; i < bytes.byteLength; i += chunkSize) {
-          chunks.push(String.fromCharCode(...bytes.subarray(i, i + chunkSize)));
-        }
-        const base64Data = btoa(chunks.join(""));
+          // Blob is available globally in Node.js 18+ (which Convex uses)
+          const blob = new Blob([arrayBuffer], { type: mimeType });
+          const geminiFile = await ai.files.upload({
+            file: blob,
+            config: { mimeType },
+          });
 
-        const extractionResult = (await generateWithRetry(() =>
-          model.generateContent([
-            EXTRACTION_PROMPT,
-            {
-              inlineData: {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                mimeType: (doc.mimeType ?? "application/pdf") as any,
-                data: base64Data,
-              },
-            },
-          ])
-        )) as Awaited<ReturnType<typeof model.generateContent>>;
+          return { doc, geminiFile };
+        })
+      );
 
-        const extractionText = extractionResult.response.text();
-        const jsonSource = extractionText.match(/\{[\s\S]*\}/)?.[0] ?? extractionText;
-        if (!jsonSource.trim()) {
-          throw new Error(`Failed to extract data from ${doc.fileName}`);
-        }
+      // Phase 2: Poll until all uploaded files are ACTIVE.
+      // Small PDFs are typically ACTIVE immediately; this handles edge cases.
+      const activeFiles = await Promise.all(
+        uploadedFiles.map(async ({ doc, geminiFile }) => {
+          let file = geminiFile;
+          let attempts = 0;
+          while (file.state === "PROCESSING" && attempts < 15) {
+            await new Promise((r) => setTimeout(r, 2000));
+            file = await ai.files.get({ name: file.name! });
+            attempts++;
+          }
+          if (file.state !== "ACTIVE") {
+            throw new Error(`File failed to become ready: ${doc.fileName}`);
+          }
+          return { doc, geminiFile: file };
+        })
+      );
 
-        const extractedData = JSON.parse(sanitizeJson(jsonSource));
-        extractedDataArray.push({
-          fileName: doc.fileName,
-          data: extractedData,
-        });
-      }
+      // Phase 3: Extract data from all documents in parallel using file URIs.
+      // Gemini reads the full document from its Files API storage — no base64
+      // payload in the request, no 50MB PDF limit for inline data.
+      const extractedDataArray = await Promise.all(
+        activeFiles.map(async ({ doc, geminiFile }) => {
+          const extractionResult = (await generateWithRetry(() =>
+            ai.models.generateContent({
+              model: "gemini-2.0-flash",
+              contents: createUserContent([
+                EXTRACTION_PROMPT,
+                createPartFromUri(geminiFile.uri!, geminiFile.mimeType!),
+              ]),
+              config: { responseMimeType: "application/json" },
+            })
+          )) as { text: string };
 
-      // Step 2: Generate comparison
+          const jsonSource =
+            extractionResult.text.match(/\{[\s\S]*\}/)?.[0] ?? extractionResult.text;
+          if (!jsonSource.trim()) {
+            throw new Error(`Failed to extract data from ${doc.fileName}`);
+          }
+
+          const data = JSON.parse(sanitizeJson(jsonSource));
+          const role =
+            doc.documentRole === "current_policy" ? "CURRENT POLICY" : "NEW QUOTE";
+          return { fileName: doc.fileName, role, data };
+        })
+      );
+
+      // Phase 4: Generate comparison from structured extracted data.
       const comparisonInput =
         COMPARISON_PROMPT +
         "\n\nClient Name: " +
@@ -231,10 +303,15 @@ export const processQuotes = action({
         JSON.stringify(extractedDataArray, null, 2);
 
       const comparisonResult = (await generateWithRetry(() =>
-        model.generateContent(comparisonInput)
-      )) as Awaited<ReturnType<typeof model.generateContent>>;
-      const comparisonText = comparisonResult.response.text();
-      const comparisonJsonSource = comparisonText.match(/\{[\s\S]*\}/)?.[0] ?? comparisonText;
+        ai.models.generateContent({
+          model: "gemini-2.0-flash",
+          contents: [{ role: "user", parts: [{ text: comparisonInput }] }],
+          config: { responseMimeType: "application/json" },
+        })
+      )) as { text: string };
+
+      const comparisonJsonSource =
+        comparisonResult.text.match(/\{[\s\S]*\}/)?.[0] ?? comparisonResult.text;
       if (!comparisonJsonSource.trim()) {
         throw new Error("Failed to generate comparison");
       }
@@ -249,10 +326,19 @@ export const processQuotes = action({
           coverComparison: result.coverComparison || {},
           excessComparison: result.excessComparison || {},
           conditionsDifferences: result.conditionsDifferences || {},
+          shortfalls: result.shortfalls || {},
           recommendation: result.recommendation || "",
           emailDraft: result.emailDraft || "",
         },
       });
+
+      // Phase 5: Clean up uploaded files from Gemini. Best-effort — files
+      // expire automatically after 48 hours if this fails.
+      await Promise.allSettled(
+        activeFiles.map(({ geminiFile }) =>
+          ai.files.delete({ name: geminiFile.name! })
+        )
+      );
 
       return { success: true };
     } catch (error) {

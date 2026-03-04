@@ -29,6 +29,7 @@ export const addDocument = mutation({
     fileName: v.string(),
     storageId: v.id("_storage"),
     mimeType: v.optional(v.string()),
+    documentRole: v.optional(v.union(v.literal("current_policy"), v.literal("new_quote"))),
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert("documents", {
@@ -36,6 +37,7 @@ export const addDocument = mutation({
       fileName: args.fileName,
       storageId: args.storageId,
       mimeType: args.mimeType,
+      documentRole: args.documentRole,
     });
   },
 });
