@@ -18,6 +18,7 @@ import {
   FileWarning,
   ThumbsUp,
   AlertCircle,
+  AlertOctagon,
 } from "lucide-react";
 
 interface PremiumItem {
@@ -91,6 +92,43 @@ interface ComparisonResultProps {
     };
     recommendation: string;
   };
+}
+
+function CoverValue({ value }: { value: string }) {
+  if (!value || value === "—") return <span className="text-muted-foreground">—</span>;
+
+  const isNoCover =
+    value.toLowerCase() === "no cover" ||
+    value.toLowerCase() === "not included" ||
+    value.toLowerCase() === "excluded";
+
+  const isVerify = value.startsWith("⚠ VERIFY:");
+  const displayValue = isVerify ? value.replace("⚠ VERIFY:", "").trim() : value;
+
+  if (isNoCover) {
+    return (
+      <Badge variant="destructive" className="text-xs font-normal">
+        No Cover
+      </Badge>
+    );
+  }
+
+  if (isVerify) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span>{displayValue}</span>
+        <span
+          className="inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400"
+          title="This value could not be clearly read from the document — please verify"
+        >
+          <AlertOctagon className="h-2.5 w-2.5" />
+          Verify
+        </span>
+      </span>
+    );
+  }
+
+  return <span>{value}</span>;
 }
 
 export function ComparisonResult({ result }: ComparisonResultProps) {
@@ -315,7 +353,7 @@ export function ComparisonResult({ result }: ComparisonResultProps) {
                           </TableCell>
                           {insurerNames.map((name) => (
                             <TableCell key={name} className="text-sm align-top whitespace-normal break-words">
-                              {feature.values[name] ?? "—"}
+                              <CoverValue value={feature.values[name] ?? "—"} />
                             </TableCell>
                           ))}
                         </TableRow>
@@ -400,7 +438,7 @@ export function ComparisonResult({ result }: ComparisonResultProps) {
                                 </TableCell>
                                 {insurerNames.map((name) => (
                                   <TableCell key={name} className="text-sm align-top whitespace-normal break-words">
-                                    {scenario.values[name] ?? "—"}
+                                    <CoverValue value={scenario.values[name] ?? "—"} />
                                   </TableCell>
                                 ))}
                               </TableRow>

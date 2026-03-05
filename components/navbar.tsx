@@ -3,8 +3,23 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
-import { BarChart3, Users, LayoutDashboard, Plus } from "lucide-react";
+import {
+  BarChart3,
+  Users,
+  LayoutDashboard,
+  Plus,
+  RefreshCw,
+  FileText,
+  ChevronDown,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 const navigation = [
@@ -47,12 +62,37 @@ export function Navbar() {
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
-          <Link href="/comparison/new">
-            <Button size="sm" className="gap-2">
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">New Comparison</span>
-            </Button>
-          </Link>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" className="gap-1.5">
+                <Plus className="h-4 w-4" />
+                <span className="hidden sm:inline">New</span>
+                <ChevronDown className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem asChild>
+                <Link href="/comparison/new" className="flex items-center gap-2 cursor-pointer">
+                  <BarChart3 className="h-4 w-4" />
+                  New Comparison
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link href="/renewal/new" className="flex items-center gap-2 cursor-pointer">
+                  <RefreshCw className="h-4 w-4" />
+                  New Renewal
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link href="/claims/new" className="flex items-center gap-2 cursor-pointer">
+                  <FileText className="h-4 w-4" />
+                  New Claim
+                </Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <UserButton
             afterSignOutUrl="/sign-in"
             appearance={{

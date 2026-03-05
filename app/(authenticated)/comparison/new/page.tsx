@@ -19,7 +19,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, Loader2, CheckCircle2, File as FileIcon } from "lucide-react";
+import { ArrowLeft, Loader2, Check } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { DocumentRow } from "@/components/document-row";
 import { toast } from "sonner";
 import Link from "next/link";
 
@@ -183,69 +185,88 @@ function NewComparisonContent() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-6 items-start">
-        {/* Left column: Step 1 Details */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">1. Comparison Details</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Contact *</Label>
-              <ContactSelector
-                value={contactId}
-                onChange={setContactId}
-                disabled={!!comparisonId}
-              />
-            </div>
+      {/* Two-panel layout: details contracts left, uploads slide in right */}
+      <div className="flex flex-col md:flex-row gap-6 items-start">
 
-            <div className="space-y-2">
-              <Label htmlFor="title">Title *</Label>
-              <Input
-                id="title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Naidoo — Budget vs Hollard Personal Lines"
-                disabled={!!comparisonId}
-              />
-            </div>
+        {/* ── Step 1: Details panel ─────────────────────────────────────────── */}
+        <div
+          className={cn(
+            "shrink-0 transition-[width] duration-500 ease-in-out",
+            "w-full",
+            comparisonId && "md:w-80"
+          )}
+        >
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">1. Comparison Details</CardTitle>
+                {comparisonId && (
+                  <span className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
+                    <Check className="h-3.5 w-3.5" />
+                    Confirmed
+                  </span>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label>Contact *</Label>
+                <ContactSelector
+                  value={contactId}
+                  onChange={setContactId}
+                  disabled={!!comparisonId}
+                />
+              </div>
 
-            <div className="space-y-2">
-              <Label>Insurance Type</Label>
-              <Select
-                value={insuranceType}
-                onValueChange={setInsuranceType}
-                disabled={!!comparisonId}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select type (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  {INSURANCE_TYPES.map((type) => (
-                    <SelectItem key={type.value} value={type.value}>
-                      {type.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor="title">Title *</Label>
+                <Input
+                  id="title"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="e.g. Naidoo — Budget vs Hollard Personal Lines"
+                  disabled={!!comparisonId}
+                />
+              </div>
 
-            {!comparisonId && (
-              <Button
-                onClick={handleCreateComparison}
-                disabled={!contactId || !title.trim()}
-                className="w-full"
-              >
-                Continue to Upload
-              </Button>
-            )}
-          </CardContent>
-        </Card>
+              <div className="space-y-2">
+                <Label>Insurance Type</Label>
+                <Select
+                  value={insuranceType}
+                  onValueChange={setInsuranceType}
+                  disabled={!!comparisonId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {INSURANCE_TYPES.map((type) => (
+                      <SelectItem key={type.value} value={type.value}>
+                        {type.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-        {/* Right column: Upload steps */}
-        <div className="space-y-6">
-          {/* Step 2a: Current Policy Upload */}
-          {comparisonId && (
+              {!comparisonId && (
+                <Button
+                  onClick={handleCreateComparison}
+                  disabled={!contactId || !title.trim()}
+                  className="w-full"
+                >
+                  Continue to Upload
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* ── Steps 2-4: Upload + Generate — slide in from the right ────────── */}
+        {comparisonId && (
+          <div className="flex-1 min-w-0 space-y-6 animate-in slide-in-from-right-8 fade-in duration-500">
+
+            {/* Step 2: Current Policy */}
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -258,13 +279,13 @@ function NewComparisonContent() {
                   <Badge variant="secondary" className="shrink-0 ml-2">Optional</Badge>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-3">
                 {existingCurrentPolicy ? (
-                  <div className="flex items-center gap-3 rounded-lg border p-3 bg-muted/30">
-                    <FileIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <p className="text-sm truncate flex-1">{existingCurrentPolicy.fileName}</p>
-                    <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
-                  </div>
+                  <DocumentRow
+                    id={existingCurrentPolicy._id}
+                    fileName={existingCurrentPolicy.fileName}
+                    onRemoved={() => setCurrentPolicyReady(false)}
+                  />
                 ) : (
                   <FileUpload
                     comparisonId={comparisonId}
@@ -275,17 +296,10 @@ function NewComparisonContent() {
                     hint="or click to browse. PDF or image accepted. One file only."
                   />
                 )}
-                {currentPolicyReady && !existingCurrentPolicy && (
-                  <p className="text-xs text-green-600">
-                    Current policy uploaded. The AI will use this as the baseline.
-                  </p>
-                )}
               </CardContent>
             </Card>
-          )}
 
-          {/* Step 2b: New Quotes Upload */}
-          {comparisonId && (
+            {/* Step 3: New Quotes */}
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -298,21 +312,23 @@ function NewComparisonContent() {
                   <Badge variant="outline" className="shrink-0 ml-2">Required</Badge>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-3">
                 {existingNewQuotes && existingNewQuotes.length > 0 && (
                   <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground font-medium">
-                      Previously uploaded
-                    </p>
+                    <p className="text-xs text-muted-foreground font-medium">Uploaded quotes</p>
                     {existingNewQuotes.map((doc) => (
-                      <div
+                      <DocumentRow
                         key={doc._id}
-                        className="flex items-center gap-3 rounded-lg border p-3"
-                      >
-                        <FileIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-                        <p className="text-sm truncate flex-1">{doc.fileName}</p>
-                        <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
-                      </div>
+                        id={doc._id}
+                        fileName={doc.fileName}
+                        insurerName={doc.insurerName}
+                        showInsurerName
+                        onRemoved={() => {
+                          if ((existingNewQuotes?.length ?? 0) <= 1) {
+                            setNewQuotesReady(false);
+                          }
+                        }}
+                      />
                     ))}
                   </div>
                 )}
@@ -330,38 +346,38 @@ function NewComparisonContent() {
                 )}
               </CardContent>
             </Card>
-          )}
 
-          {/* Step 3: Generate */}
-          {comparisonId && canGenerate && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">4. Generate Comparison</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground mb-4">
-                  {currentPolicyReady
-                    ? "AI will extract data from all documents and generate a professional comparison, including shortfall analysis against the current policy."
-                    : "AI will extract data from all quotes and generate a professional side-by-side comparison. For shortfall analysis, also upload the current policy above."}
-                </p>
-                <Button
-                  onClick={handleProcess}
-                  disabled={isProcessing}
-                  className="w-full gap-2"
-                >
-                  {isProcessing ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Processing Documents...
-                    </>
-                  ) : (
-                    "Generate Comparison"
-                  )}
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+            {/* Step 4: Generate */}
+            {canGenerate && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">4. Generate Comparison</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    {currentPolicyReady
+                      ? "AI will extract data from all documents and generate a professional comparison, including shortfall analysis against the current policy."
+                      : "AI will extract data from all quotes and generate a professional side-by-side comparison. For shortfall analysis, also upload the current policy above."}
+                  </p>
+                  <Button
+                    onClick={handleProcess}
+                    disabled={isProcessing}
+                    className="w-full gap-2"
+                  >
+                    {isProcessing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Processing Documents...
+                      </>
+                    ) : (
+                      "Generate Comparison"
+                    )}
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

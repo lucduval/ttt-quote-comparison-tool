@@ -8,9 +8,11 @@
  * @module
  */
 
+import type * as claims from "../claims.js";
 import type * as comparisons from "../comparisons.js";
 import type * as contacts from "../contacts.js";
 import type * as documents from "../documents.js";
+import type * as processClaim from "../processClaim.js";
 import type * as processQuotes from "../processQuotes.js";
 
 import type {
@@ -20,9 +22,11 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  claims: typeof claims;
   comparisons: typeof comparisons;
   contacts: typeof contacts;
   documents: typeof documents;
+  processClaim: typeof processClaim;
   processQuotes: typeof processQuotes;
 }>;
 

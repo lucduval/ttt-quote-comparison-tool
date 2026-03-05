@@ -27,6 +27,7 @@ export default defineSchema({
       v.literal("failed")
     ),
     insuranceType: v.optional(v.string()),
+    comparisonType: v.optional(v.union(v.literal("comparison"), v.literal("renewal"))),
     result: v.optional(
       v.object({
         summary: v.string(),
@@ -35,6 +36,7 @@ export default defineSchema({
         excessComparison: v.any(),
         conditionsDifferences: v.any(),
         shortfalls: v.optional(v.any()),
+        renewalChanges: v.optional(v.any()),
         recommendation: v.string(),
         emailDraft: v.string(),
       })
@@ -52,4 +54,25 @@ export default defineSchema({
     extractedData: v.optional(v.any()),
     documentRole: v.optional(v.union(v.literal("current_policy"), v.literal("new_quote"))),
   }).index("by_comparison", ["comparisonId"]),
+
+  claims: defineTable({
+    userId: v.string(),
+    contactId: v.id("contacts"),
+    insurer: v.string(),
+    claimType: v.union(v.literal("motor"), v.literal("property")),
+    status: v.union(v.literal("draft"), v.literal("submitted")),
+    incidentDate: v.optional(v.string()),
+    description: v.optional(v.string()),
+    estimatedLoss: v.optional(v.string()),
+    policeCaseNumber: v.optional(v.string()),
+    policyNumber: v.optional(v.string()),
+    result: v.optional(
+      v.object({
+        formDraft: v.string(),
+        emailDraft: v.string(),
+      })
+    ),
+  })
+    .index("by_user", ["userId"])
+    .index("by_contact", ["contactId"]),
 });

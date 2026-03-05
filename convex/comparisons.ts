@@ -48,6 +48,7 @@ export const create = mutation({
     contactId: v.id("contacts"),
     title: v.string(),
     insuranceType: v.optional(v.string()),
+    comparisonType: v.optional(v.union(v.literal("comparison"), v.literal("renewal"))),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -59,6 +60,7 @@ export const create = mutation({
       title: args.title,
       status: "uploading",
       insuranceType: args.insuranceType,
+      comparisonType: args.comparisonType,
     });
   },
 });
@@ -88,6 +90,7 @@ export const storeResult = mutation({
       excessComparison: v.any(),
       conditionsDifferences: v.any(),
       shortfalls: v.optional(v.any()),
+      renewalChanges: v.optional(v.any()),
       recommendation: v.string(),
       emailDraft: v.string(),
     }),

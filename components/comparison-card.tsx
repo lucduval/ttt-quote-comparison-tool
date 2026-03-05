@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { FileText, Clock, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { FileText, Clock, CheckCircle2, AlertCircle, Loader2, RefreshCw } from "lucide-react";
 import { Id } from "@/convex/_generated/dataModel";
 
 interface ComparisonCardProps {
@@ -13,6 +13,7 @@ interface ComparisonCardProps {
   insuranceType?: string;
   contactName?: string;
   createdAt: number;
+  comparisonType?: "comparison" | "renewal";
 }
 
 const statusConfig = {
@@ -45,21 +46,29 @@ export function ComparisonCard({
   insuranceType,
   contactName,
   createdAt,
+  comparisonType,
 }: ComparisonCardProps) {
   const config = statusConfig[status];
   const StatusIcon = config.icon;
+  const isRenewal = comparisonType === "renewal";
 
   const href =
     status === "uploading"
-      ? `/comparison/new?resumeId=${id}`
-      : `/comparison/${id}`;
+      ? isRenewal
+        ? `/renewal/new?resumeId=${id}`
+        : `/comparison/new?resumeId=${id}`
+      : isRenewal
+        ? `/renewal/${id}`
+        : `/comparison/${id}`;
+
+  const RowIcon = isRenewal ? RefreshCw : FileText;
 
   return (
     <Link href={href}>
       <Card className="transition-colors hover:bg-muted/50 cursor-pointer">
         <CardContent className="flex items-center gap-3 p-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-            <FileText className="h-5 w-5 text-primary" />
+            <RowIcon className="h-5 w-5 text-primary" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
@@ -76,6 +85,12 @@ export function ComparisonCard({
                 <span className="text-xs text-muted-foreground truncate">
                   {contactName}
                 </span>
+              )}
+              {isRenewal && (
+                <>
+                  <span className="text-xs text-muted-foreground">·</span>
+                  <span className="text-xs text-muted-foreground">Renewal</span>
+                </>
               )}
               {insuranceType && (
                 <>
