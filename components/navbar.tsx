@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ShieldCheck,
 } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -64,6 +65,21 @@ export function Navbar() {
               </Link>
             );
           })}
+          {isAdmin && (
+            <Link href="/admin">
+              <Button
+                variant={pathname.startsWith("/admin") ? "secondary" : "ghost"}
+                size="sm"
+                className={cn(
+                  "gap-2 text-sm",
+                  pathname.startsWith("/admin") && "font-medium"
+                )}
+              >
+                <ShieldCheck className="h-4 w-4" />
+                <span className="hidden sm:inline">Admin</span>
+              </Button>
+            </Link>
+          )}
         </nav>
 
         <div className="ml-auto flex items-center gap-3">

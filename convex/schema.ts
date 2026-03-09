@@ -55,6 +55,10 @@ export default defineSchema({
     documentRole: v.optional(v.union(v.literal("current_policy"), v.literal("new_quote"))),
   }).index("by_comparison", ["comparisonId"]),
 
+  sessions: defineTable({
+    userId: v.string(),
+  }).index("by_user", ["userId"]),
+
   claims: defineTable({
     userId: v.string(),
     contactId: v.id("contacts"),
