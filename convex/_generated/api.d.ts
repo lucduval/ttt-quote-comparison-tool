@@ -16,6 +16,7 @@ import type * as documents from "../documents.js";
 import type * as lib_roles from "../lib/roles.js";
 import type * as processClaim from "../processClaim.js";
 import type * as processQuotes from "../processQuotes.js";
+import type * as refineOutput from "../refineOutput.js";
 import type * as sessions from "../sessions.js";
 
 import type {
@@ -33,6 +34,7 @@ declare const fullApi: ApiFromModules<{
   "lib/roles": typeof lib_roles;
   processClaim: typeof processClaim;
   processQuotes: typeof processQuotes;
+  refineOutput: typeof refineOutput;
   sessions: typeof sessions;
 }>;
 

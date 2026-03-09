@@ -8,6 +8,7 @@ import { Id } from "@/convex/_generated/dataModel";
 import { RenewalResult } from "@/components/renewal-result";
 import { EmailPreview } from "@/components/email-preview";
 import { PdfExport } from "@/components/pdf-export";
+import { RefineChat } from "@/components/refine-chat";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -108,13 +109,16 @@ export default function RenewalDetailPage() {
             </span>
           </div>
         </div>
-        {isCompleted && comparison.result && contact && (
-          <div className="self-start sm:self-auto shrink-0">
-            <PdfExport
-              title={comparison.title}
-              emailDraft={comparison.result.emailDraft}
-              contactName={contact.name}
-            />
+        {isCompleted && comparison.result && (
+          <div className="self-start sm:self-auto shrink-0 flex items-center gap-2">
+            <RefineChat comparisonId={comparisonId} />
+            {contact && (
+              <PdfExport
+                title={comparison.title}
+                emailDraft={comparison.result.emailDraft}
+                contactName={contact.name}
+              />
+            )}
           </div>
         )}
       </div>
