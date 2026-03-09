@@ -1,11 +1,16 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { isAdmin } from "./lib/roles";
 
 export const list = query({
   args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
+
+    if (isAdmin(identity)) {
+      return await ctx.db.query("comparisons").order("desc").collect();
+    }
 
     return await ctx.db
       .query("comparisons")
@@ -36,7 +41,9 @@ export const get = query({
     if (!identity) throw new Error("Not authenticated");
 
     const comparison = await ctx.db.get(args.id);
-    if (!comparison || comparison.userId !== identity.subject) {
+    if (!comparison) throw new Error("Comparison not found");
+
+    if (!isAdmin(identity) && comparison.userId !== identity.subject) {
       throw new Error("Comparison not found");
     }
     return comparison;
@@ -110,7 +117,9 @@ export const remove = mutation({
     if (!identity) throw new Error("Not authenticated");
 
     const comparison = await ctx.db.get(args.id);
-    if (!comparison || comparison.userId !== identity.subject) {
+    if (!comparison) throw new Error("Comparison not found");
+
+    if (!isAdmin(identity) && comparison.userId !== identity.subject) {
       throw new Error("Comparison not found");
     }
 

@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { isAdmin } from "./lib/roles";
 
 export const listByComparison = query({
   args: { comparisonId: v.id("comparisons") },
@@ -49,8 +50,17 @@ export const removeDocument = mutation({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
+
     const doc = await ctx.db.get(args.id);
     if (!doc) throw new Error("Document not found");
+
+    const comparison = await ctx.db.get(doc.comparisonId);
+    if (!comparison) throw new Error("Document not found");
+
+    if (!isAdmin(identity) && comparison.userId !== identity.subject) {
+      throw new Error("Document not found");
+    }
+
     await ctx.storage.delete(doc.storageId);
     await ctx.db.delete(args.id);
   },
@@ -61,6 +71,17 @@ export const updateInsurerName = mutation({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
+
+    const doc = await ctx.db.get(args.id);
+    if (!doc) throw new Error("Document not found");
+
+    const comparison = await ctx.db.get(doc.comparisonId);
+    if (!comparison) throw new Error("Document not found");
+
+    if (!isAdmin(identity) && comparison.userId !== identity.subject) {
+      throw new Error("Document not found");
+    }
+
     await ctx.db.patch(args.id, {
       insurerName: args.insurerName || undefined,
     });

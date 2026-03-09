@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
+import { UserButton, useUser } from "@clerk/nextjs";
 import {
   BarChart3,
   Users,
@@ -11,8 +11,10 @@ import {
   RefreshCw,
   FileText,
   ChevronDown,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,6 +31,9 @@ const navigation = [
 
 export function Navbar() {
   const pathname = usePathname();
+  const { user } = useUser();
+  const isAdmin =
+    (user?.publicMetadata as { role?: string } | undefined)?.role === "admin";
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -62,6 +67,15 @@ export function Navbar() {
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
+          {isAdmin && (
+            <Badge
+              variant="secondary"
+              className="gap-1.5 hidden sm:flex text-xs font-medium"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Admin
+            </Badge>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button size="sm" className="gap-1.5">

@@ -1,11 +1,16 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { isAdmin } from "./lib/roles";
 
 export const list = query({
   args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
+
+    if (isAdmin(identity)) {
+      return await ctx.db.query("contacts").collect();
+    }
 
     return await ctx.db
       .query("contacts")
@@ -21,7 +26,9 @@ export const get = query({
     if (!identity) throw new Error("Not authenticated");
 
     const contact = await ctx.db.get(args.id);
-    if (!contact || contact.userId !== identity.subject) {
+    if (!contact) throw new Error("Contact not found");
+
+    if (!isAdmin(identity) && contact.userId !== identity.subject) {
       throw new Error("Contact not found");
     }
     return contact;
@@ -34,10 +41,22 @@ export const search = query({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
 
+    const admin = isAdmin(identity);
+
     if (args.query.trim() === "") {
+      if (admin) {
+        return await ctx.db.query("contacts").collect();
+      }
       return await ctx.db
         .query("contacts")
         .withIndex("by_user", (q) => q.eq("userId", identity.subject))
+        .collect();
+    }
+
+    if (admin) {
+      return await ctx.db
+        .query("contacts")
+        .withSearchIndex("search_name", (q) => q.search("name", args.query))
         .collect();
     }
 
@@ -83,7 +102,9 @@ export const update = mutation({
     if (!identity) throw new Error("Not authenticated");
 
     const contact = await ctx.db.get(args.id);
-    if (!contact || contact.userId !== identity.subject) {
+    if (!contact) throw new Error("Contact not found");
+
+    if (!isAdmin(identity) && contact.userId !== identity.subject) {
       throw new Error("Contact not found");
     }
 
@@ -103,7 +124,9 @@ export const remove = mutation({
     if (!identity) throw new Error("Not authenticated");
 
     const contact = await ctx.db.get(args.id);
-    if (!contact || contact.userId !== identity.subject) {
+    if (!contact) throw new Error("Contact not found");
+
+    if (!isAdmin(identity) && contact.userId !== identity.subject) {
       throw new Error("Contact not found");
     }
 
