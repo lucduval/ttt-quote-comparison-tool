@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { ArrowLeft, Loader2, RefreshCw, Check } from "lucide-react";
 import { toast } from "sonner";
@@ -35,6 +36,7 @@ function NewRenewalContent() {
   const [comparisonId, setComparisonId] = useState<Id<"comparisons"> | null>(resumeId);
   const [previousReady, setPreviousReady] = useState(false);
   const [renewalReady, setRenewalReady] = useState(false);
+  const [customPrompt, setCustomPrompt] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [initialized, setInitialized] = useState(!resumeId);
 
@@ -55,6 +57,7 @@ function NewRenewalContent() {
     if (existingComparison && !initialized) {
       setTitle(existingComparison.title);
       setContactId(existingComparison.contactId);
+      setCustomPrompt(existingComparison.customPrompt ?? "");
       setInitialized(true);
     }
   }, [existingComparison, initialized]);
@@ -80,6 +83,7 @@ function NewRenewalContent() {
         contactId,
         title: title.trim(),
         comparisonType: "renewal",
+        customPrompt: customPrompt.trim() || undefined,
       });
       setComparisonId(id);
       toast.success("Renewal created. Upload documents below.");
@@ -182,6 +186,22 @@ function NewRenewalContent() {
                   placeholder="e.g. Smith — 2026 Renewal Review"
                   disabled={!!comparisonId}
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="customPrompt">Custom AI Instructions</Label>
+                <Textarea
+                  id="customPrompt"
+                  value={customPrompt}
+                  onChange={(e) => setCustomPrompt(e.target.value)}
+                  placeholder="e.g. Pay close attention to excess increases, or Highlight any removed cover"
+                  disabled={!!comparisonId}
+                  rows={3}
+                  className="resize-none text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Optional — give the AI specific instructions about what to focus on or look for in the renewal analysis.
+                </p>
               </div>
 
               {!comparisonId && (

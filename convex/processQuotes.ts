@@ -356,6 +356,11 @@ export const processQuotes = action({
         comparisonId: args.comparisonId,
       });
 
+      // Fetch the comparison record to check for a custom prompt
+      const comparison = await ctx.runQuery(api.comparisons.get, {
+        id: args.comparisonId,
+      });
+
       const newQuotes = documents.filter((d) => d.documentRole !== "current_policy");
       const currentPolicy = documents.find((d) => d.documentRole === "current_policy");
 
@@ -377,7 +382,10 @@ export const processQuotes = action({
                 EXTRACTION_PROMPT,
                 createPartFromUri(geminiFile.uri!, geminiFile.mimeType!),
               ]),
-              config: { responseMimeType: "application/json" },
+              config: {
+                responseMimeType: "application/json",
+                maxOutputTokens: 65536,
+              },
             })
           )) as { text: string };
 
@@ -401,8 +409,13 @@ export const processQuotes = action({
       );
 
       // Phase 4: Generate comparison from structured extracted data.
+      const customPromptBlock = comparison?.customPrompt
+        ? `\n\nPRIORITY INSTRUCTION FROM THE BROKER (treat this as the most important guidance for the analysis):\n${comparison.customPrompt}\n`
+        : "";
+
       const comparisonInput =
         COMPARISON_PROMPT +
+        customPromptBlock +
         "\n\nClient Name: " +
         args.contactName +
         "\n\n" +
@@ -412,7 +425,10 @@ export const processQuotes = action({
         ai.models.generateContent({
           model: "gemini-2.0-flash",
           contents: [{ role: "user", parts: [{ text: comparisonInput }] }],
-          config: { responseMimeType: "application/json" },
+          config: {
+            responseMimeType: "application/json",
+            maxOutputTokens: 65536,
+          },
         })
       )) as { text: string };
 
@@ -484,6 +500,11 @@ export const processRenewal = action({
         comparisonId: args.comparisonId,
       });
 
+      // Fetch the comparison record to check for a custom prompt
+      const comparison = await ctx.runQuery(api.comparisons.get, {
+        id: args.comparisonId,
+      });
+
       if (documents.length < 2) {
         throw new Error(
           "Renewal analysis requires exactly 2 documents: the previous schedule and the renewal quote"
@@ -525,8 +546,13 @@ export const processRenewal = action({
         })
       );
 
+      const customPromptBlock = comparison?.customPrompt
+        ? `\n\nPRIORITY INSTRUCTION FROM THE BROKER (treat this as the most important guidance for the analysis):\n${comparison.customPrompt}\n`
+        : "";
+
       const renewalInput =
         RENEWAL_PROMPT +
+        customPromptBlock +
         "\n\nClient Name: " +
         args.contactName +
         "\n\n" +
@@ -536,7 +562,10 @@ export const processRenewal = action({
         ai.models.generateContent({
           model: "gemini-2.0-flash",
           contents: [{ role: "user", parts: [{ text: renewalInput }] }],
-          config: { responseMimeType: "application/json" },
+          config: {
+            responseMimeType: "application/json",
+            maxOutputTokens: 65536,
+          },
         })
       )) as { text: string };
 

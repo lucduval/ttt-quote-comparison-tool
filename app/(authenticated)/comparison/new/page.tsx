@@ -10,6 +10,7 @@ import { FileUpload } from "@/components/file-upload";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -47,6 +48,7 @@ function NewComparisonContent() {
   );
   const [title, setTitle] = useState("");
   const [insuranceType, setInsuranceType] = useState("");
+  const [customPrompt, setCustomPrompt] = useState("");
   const [comparisonId, setComparisonId] = useState<Id<"comparisons"> | null>(
     resumeId
   );
@@ -73,6 +75,7 @@ function NewComparisonContent() {
       setTitle(existingComparison.title);
       setContactId(existingComparison.contactId);
       setInsuranceType(existingComparison.insuranceType ?? "");
+      setCustomPrompt(existingComparison.customPrompt ?? "");
       setInitialized(true);
     }
   }, [existingComparison, initialized]);
@@ -107,6 +110,7 @@ function NewComparisonContent() {
         contactId,
         title: title.trim(),
         insuranceType: insuranceType || undefined,
+        customPrompt: customPrompt.trim() || undefined,
       });
       setComparisonId(id);
       toast.success("Comparison created. Upload documents below.");
@@ -247,6 +251,22 @@ function NewComparisonContent() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="customPrompt">Custom AI Instructions</Label>
+                <Textarea
+                  id="customPrompt"
+                  value={customPrompt}
+                  onChange={(e) => setCustomPrompt(e.target.value)}
+                  placeholder="e.g. Focus on motor excess differences, or Flag any policies without geyser cover"
+                  disabled={!!comparisonId}
+                  rows={3}
+                  className="resize-none text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Optional — give the AI specific instructions about what to focus on or look for in the comparison.
+                </p>
               </div>
 
               {!comparisonId && (

@@ -28,6 +28,7 @@ export default defineSchema({
     ),
     insuranceType: v.optional(v.string()),
     comparisonType: v.optional(v.union(v.literal("comparison"), v.literal("renewal"))),
+    customPrompt: v.optional(v.string()),
     result: v.optional(
       v.object({
         summary: v.string(),

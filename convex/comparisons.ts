@@ -56,6 +56,7 @@ export const create = mutation({
     title: v.string(),
     insuranceType: v.optional(v.string()),
     comparisonType: v.optional(v.union(v.literal("comparison"), v.literal("renewal"))),
+    customPrompt: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -68,6 +69,7 @@ export const create = mutation({
       status: "uploading",
       insuranceType: args.insuranceType,
       comparisonType: args.comparisonType,
+      customPrompt: args.customPrompt,
     });
   },
 });
