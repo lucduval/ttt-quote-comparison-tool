@@ -2,10 +2,7 @@ import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api } from "./_generated/api";
 import { GoogleGenAI } from "@google/genai";
-
-function sanitizeJson(raw: string): string {
-  return raw.replace(/[\u0000-\u001F\u007F]/g, "");
-}
+import { safeJsonParse } from "./lib/jsonParse";
 
 async function generateWithRetry(
   fn: () => Promise<unknown>,
@@ -86,7 +83,8 @@ ${currentResultJson}`;
       throw new Error("Gemini returned an empty response");
     }
 
-    const refinedResult = JSON.parse(sanitizeJson(jsonSource));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const refinedResult = safeJsonParse(jsonSource, "refinement") as any;
 
     await ctx.runMutation(api.comparisons.storeResult, {
       id: args.comparisonId,

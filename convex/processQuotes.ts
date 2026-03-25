@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api } from "./_generated/api";
 import { GoogleGenAI, createUserContent, createPartFromUri } from "@google/genai";
+import { safeJsonParse } from "./lib/jsonParse";
 
 const EXTRACTION_PROMPT = `You are an expert South African insurance analyst. Analyze this insurance policy document or quote schedule and extract ALL sections it contains.
 
@@ -238,14 +239,6 @@ IMPORTANT:
 Here is the extracted data:
 `;
 
-function sanitizeJson(raw: string): string {
-  // Strip control characters that are never valid in JSON outside of string
-  // values. DO NOT convert \n → \\n — that turns structural whitespace into an
-  // invalid token and causes "Expected property name or '}'" at position 1.
-  // With JSON mode enabled, the model already escapes string-internal newlines.
-  return raw.replace(/[\u0000-\u001F\u007F]/g, "");
-}
-
 async function generateWithRetry(
   fn: () => Promise<unknown>,
   maxRetries = 4,
@@ -395,11 +388,11 @@ export const processQuotes = action({
             throw new Error(`Failed to extract data from ${doc.fileName}`);
           }
 
-          const data = JSON.parse(sanitizeJson(jsonSource));
+          const data = safeJsonParse(jsonSource, `extraction of ${doc.fileName}`);
 
           // Prefer broker-supplied insurer name over AI-extracted name
           if (doc.insurerName) {
-            data.insurerName = doc.insurerName;
+            (data as any).insurerName = doc.insurerName;
           }
 
           const role =
@@ -438,7 +431,8 @@ export const processQuotes = action({
         throw new Error("Failed to generate comparison");
       }
 
-      const result = JSON.parse(sanitizeJson(comparisonJsonSource));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = safeJsonParse(comparisonJsonSource, "comparison generation") as any;
 
       await ctx.runMutation(api.comparisons.storeResult, {
         id: args.comparisonId,
@@ -533,10 +527,10 @@ export const processRenewal = action({
             throw new Error(`Failed to extract data from ${doc.fileName}`);
           }
 
-          const data = JSON.parse(sanitizeJson(jsonSource));
+          const data = safeJsonParse(jsonSource, `extraction of ${doc.fileName}`);
 
           if (doc.insurerName) {
-            data.insurerName = doc.insurerName;
+            (data as any).insurerName = doc.insurerName;
           }
 
           // current_policy = previous schedule, new_quote = renewal quote
@@ -575,7 +569,8 @@ export const processRenewal = action({
         throw new Error("Failed to generate renewal analysis");
       }
 
-      const result = JSON.parse(sanitizeJson(renewalJsonSource));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = safeJsonParse(renewalJsonSource, "renewal analysis") as any;
 
       await ctx.runMutation(api.comparisons.storeResult, {
         id: args.comparisonId,

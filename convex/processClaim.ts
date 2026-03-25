@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api } from "./_generated/api";
 import { GoogleGenAI } from "@google/genai";
+import { safeJsonParse } from "./lib/jsonParse";
 
 const CLAIM_PROMPT = `You are an expert South African insurance claims specialist. Generate a pre-filled claim summary and a professional submission email for a client's insurance claim.
 
@@ -44,10 +45,6 @@ async function generateWithRetry(
       }
     }
   }
-}
-
-function sanitizeJson(raw: string): string {
-  return raw.replace(/[\u0000-\u001F\u007F]/g, "");
 }
 
 export const processClaim = action({
@@ -95,7 +92,8 @@ export const processClaim = action({
     const jsonSource = result.text.match(/\{[\s\S]*\}/)?.[0] ?? result.text;
     if (!jsonSource.trim()) throw new Error("Failed to generate claim documents");
 
-    const parsed = JSON.parse(sanitizeJson(jsonSource));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const parsed = safeJsonParse(jsonSource, "claim generation") as any;
 
     await ctx.runMutation(api.claims.storeResult, {
       id: args.claimId,
