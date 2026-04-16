@@ -12,6 +12,10 @@ import {
   AlertTriangle,
   ThumbsUp,
   ArrowUpDown,
+  CheckCircle2,
+  XCircle,
+  HelpCircle,
+  ClipboardCheck,
 } from "lucide-react";
 
 interface PremiumChange {
@@ -66,6 +70,14 @@ interface ConditionChanged {
   renewed: string;
 }
 
+interface ChecklistItem {
+  section: string;
+  item: string;
+  status: "covered" | "not_covered" | "verify";
+  currentValue?: string | null;
+  recommendation: string;
+}
+
 interface RenewalChanges {
   summary: string;
   premiumChange?: PremiumChange;
@@ -75,6 +87,7 @@ interface RenewalChanges {
   coverRemoved?: CoverRemoved[];
   coverChanged?: CoverChanged[];
   conditionsChanged?: ConditionChanged[];
+  renewalChecklist?: ChecklistItem[];
   recommendation?: string;
   emailDraft?: string;
 }
@@ -141,6 +154,38 @@ function ChangeRow({
   );
 }
 
+function StatusIcon({ status }: { status: string }) {
+  if (status === "covered") {
+    return <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />;
+  }
+  if (status === "not_covered") {
+    return <XCircle className="h-4 w-4 text-red-500 shrink-0" />;
+  }
+  return <HelpCircle className="h-4 w-4 text-amber-500 shrink-0" />;
+}
+
+function StatusBadge({ status }: { status: string }) {
+  if (status === "covered") {
+    return (
+      <Badge className="text-xs shrink-0 bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400 border-0">
+        Covered
+      </Badge>
+    );
+  }
+  if (status === "not_covered") {
+    return (
+      <Badge className="text-xs shrink-0 bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 border-0">
+        Not Covered
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="text-xs shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400 border-0">
+      Verify
+    </Badge>
+  );
+}
+
 export function RenewalResult({ renewalChanges: r }: RenewalResultProps) {
   const hasExcessChanges = (r.excessChanges?.length ?? 0) > 0;
   const hasSumInsuredChanges = (r.sumInsuredChanges?.length ?? 0) > 0;
@@ -148,6 +193,7 @@ export function RenewalResult({ renewalChanges: r }: RenewalResultProps) {
   const hasCoverRemoved = (r.coverRemoved?.length ?? 0) > 0;
   const hasCoverChanged = (r.coverChanged?.length ?? 0) > 0;
   const hasConditionsChanged = (r.conditionsChanged?.length ?? 0) > 0;
+  const hasChecklist = (r.renewalChecklist?.length ?? 0) > 0;
 
   const noChanges =
     !hasExcessChanges &&
@@ -418,6 +464,139 @@ export function RenewalResult({ renewalChanges: r }: RenewalResultProps) {
           </CardContent>
         </Card>
       )}
+
+      {/* Renewal Checklist — Policy Cover Review */}
+      {hasChecklist && (() => {
+        const notCovered = r.renewalChecklist!.filter((c) => c.status === "not_covered");
+        const verify = r.renewalChecklist!.filter((c) => c.status === "verify");
+        const covered = r.renewalChecklist!.filter((c) => c.status === "covered");
+
+        // Group items by section
+        const groupBySection = (items: ChecklistItem[]) => {
+          const groups: Record<string, ChecklistItem[]> = {};
+          for (const item of items) {
+            if (!groups[item.section]) groups[item.section] = [];
+            groups[item.section].push(item);
+          }
+          return Object.entries(groups);
+        };
+
+        return (
+          <>
+            <Separator />
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <ClipboardCheck className="h-4 w-4" />
+                  Policy Cover Review
+                </CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Standard renewal checklist — flags covers not currently on the policy or details to verify with the client.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Not Covered — most important, shown first */}
+                {notCovered.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium flex items-center gap-2 text-red-600 dark:text-red-400">
+                      <XCircle className="h-3.5 w-3.5" />
+                      Not Currently Covered ({notCovered.length})
+                    </h4>
+                    <div className="space-y-2">
+                      {groupBySection(notCovered).map(([section, items]) => (
+                        <div key={section} className="space-y-1.5">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide pl-1">{section}</p>
+                          {items.map((item, i) => (
+                            <div
+                              key={i}
+                              className="flex items-start gap-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 p-3"
+                            >
+                              <StatusIcon status={item.status} />
+                              <div className="flex-1 min-w-0 space-y-0.5">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="text-sm font-medium">{item.item}</p>
+                                  <StatusBadge status={item.status} />
+                                </div>
+                                <p className="text-xs text-muted-foreground">{item.recommendation}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Verify — second priority */}
+                {verify.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                      <HelpCircle className="h-3.5 w-3.5" />
+                      Please Verify ({verify.length})
+                    </h4>
+                    <div className="space-y-2">
+                      {groupBySection(verify).map(([section, items]) => (
+                        <div key={section} className="space-y-1.5">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide pl-1">{section}</p>
+                          {items.map((item, i) => (
+                            <div
+                              key={i}
+                              className="flex items-start gap-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3"
+                            >
+                              <StatusIcon status={item.status} />
+                              <div className="flex-1 min-w-0 space-y-0.5">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="text-sm font-medium">{item.item}</p>
+                                  <StatusBadge status={item.status} />
+                                  {item.currentValue && (
+                                    <span className="text-xs text-muted-foreground">({item.currentValue})</span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-muted-foreground">{item.recommendation}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Covered — confirmation, collapsed feel */}
+                {covered.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium flex items-center gap-2 text-green-600 dark:text-green-400">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Covered ({covered.length})
+                    </h4>
+                    <div className="grid sm:grid-cols-2 gap-1.5">
+                      {covered.map((item, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center gap-2 rounded-lg border p-2.5"
+                        >
+                          <StatusIcon status={item.status} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs font-medium truncate">{item.item}</p>
+                              <Badge variant="outline" className="text-[10px] shrink-0">
+                                {item.section}
+                              </Badge>
+                            </div>
+                            {item.currentValue && (
+                              <p className="text-[10px] text-muted-foreground truncate">{item.currentValue}</p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        );
+      })()}
 
       {/* Recommendation */}
       {r.recommendation && (

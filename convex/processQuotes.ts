@@ -1,72 +1,10 @@
 import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api } from "./_generated/api";
-import { GoogleGenAI, createUserContent, createPartFromUri } from "@google/genai";
-import { safeJsonParse } from "./lib/jsonParse";
+import { GoogleGenAI } from "@google/genai";
+import { safeJsonParse, extractJsonObject } from "./lib/jsonParse";
 
-const EXTRACTION_PROMPT = `You are an expert South African insurance analyst. Analyze this insurance policy document or quote schedule and extract ALL sections it contains.
-
-FIRST, look for a "Summary of Cover", "Schedule of Benefits", "Contents of Cover", "Policy Benefits", or "Cover at a Glance" section — this is the primary source of truth for what is and is not covered. Use this section to determine inclusions and exclusions before reading individual section details.
-
-Personal lines policies typically have multiple sections: Motor, Buildings, Contents, All-Risk/Portable Possessions, Personal Liability, etc. Extract every section present.
-
-Return ONLY valid JSON with this exact structure:
-{
-  "insurerName": "string - name of the insurance company",
-  "policyNumber": "string or null",
-  "insuredName": "string or null",
-  "effectiveDate": "string or null",
-  "totalPremium": {
-    "monthly": number or null,
-    "annual": number or null,
-    "currency": "ZAR"
-  },
-  "sections": [
-    {
-      "sectionName": "string - exact section name as it appears (e.g. Motor, Buildings, Contents, All-Risk, Personal Liability, Accidental Damage)",
-      "sectionType": "motor | buildings | contents | all_risk | liability | other",
-      "insuredItem": "string - what is insured (e.g. 2020 Toyota Corolla, Dwelling at 12 Main St, Contents of home)",
-      "sumInsured": "string or null - insured amount e.g. R500,000",
-      "sumInsuredUncertain": true or false,
-      "premium": {
-        "monthly": number or null,
-        "annual": number or null
-      },
-      "basisOfIndemnity": "string or null - e.g. Retail Value, Market Value, Replacement Value, First Loss",
-      "excess": {
-        "standard": "string - the standard/basic excess amount or formula",
-        "special": ["string - any additional or special excess clauses, e.g. driver under 25 excess, theft excess"]
-      },
-      "extensions": [
-        {
-          "name": "string - extension name, e.g. Power Surge, Geyser, Car Hire/Loss of Use, Accidental Damage, Roadside Assistance, SASRIA, Legal Costs, Personal Accident, Credit Shortfall, Towing, Glass, Windscreen, Tyre and Rim, Scratch and Dent, Excess Waiver",
-          "included": true or false,
-          "limit": "string or null - monetary limit if applicable, or 'No Cover' if nil/zero/excluded",
-          "uncertain": true or false,
-          "details": "string or null - any relevant details or conditions"
-        }
-      ],
-      "inclusions": ["string - specific items or perils included"],
-      "exclusions": ["string - specific exclusions for this section"],
-      "specialConditions": ["string - warranties, requirements, endorsements"]
-    }
-  ],
-  "sasria": "Included or Excluded or Not specified",
-  "additionalNotes": "string - any other relevant policy-wide information"
-}
-
-CRITICAL INSTRUCTIONS:
-- Extract EVERY section in the document, not just motor
-- For Contents sections: explicitly check for and list Power Surge cover as an extension (included true/false with limit)
-- For All-Risk sections: list each scheduled item with its insured value
-- For Motor sections: check for Car Hire/Loss of Use, Roadside Assistance, Windscreen, Tyre and Rim, Scratch and Dent, Credit Shortfall, Excess Waiver as extensions
-- For Buildings sections: check for Geyser, Power Surge, Accidental Damage as extensions
-- Capture ALL excess amounts accurately - read each line carefully, excess structures are often complex
-- NIL LIMITS: If an extension has a nil, zero, or R0 limit, set limit to "No Cover" and included to false. Do NOT list it as included with a blank limit.
-- EXCLUSIONS: Do NOT list an item as an extension with included:true if the Summary of Cover or policy wording marks it as excluded, not covered, or not included. Set included:false instead.
-- UNCERTAIN FLAG: Set uncertain:true on any extension or sumInsuredUncertain:true on any sum insured where you cannot clearly read the value, the document is ambiguous, or you are making an educated guess. Set to false when you are confident.
-- If a field cannot be determined from the document, use null
-- Do not invent information - only extract what is explicitly stated`;
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 const COMPARISON_PROMPT = `You are an expert South African insurance broker analyst. You have been provided with extracted data from insurance documents for the same client.
 
@@ -74,7 +12,17 @@ One document may be labelled [CURRENT POLICY] — this is the client's existing 
 
 If no [CURRENT POLICY] is present, treat all documents as quotes being compared side-by-side.
 
-Your task is to produce a comprehensive, professional, compliance-aware comparison.
+Your task is to produce a concise, professional, compliance-aware comparison.
+
+CRITICAL STYLE RULES — apply to ALL text fields in the JSON output:
+- Be CONCISE. Summarise — do not enumerate every detail.
+- Use short, direct sentences. Avoid filler, preamble, and repetition.
+- Each "analysis" field must be 1-2 sentences MAX highlighting only the most material point(s).
+- Each "details" field must be 1 sentence MAX.
+- The "recommendation" must be 3-5 sentences MAX — give a clear, decisive verdict, not an essay.
+- The "emailDraft" is the PRIMARY deliverable — the actual email the broker sends to their client. It must read like a personal, conversational message from a broker, not a system-generated report. Include all material comparison detail directly in the email with per-category tables.
+- Never repeat information already shown in tables within prose sections.
+- Only flag cover differences that are MATERIAL to the client's risk profile.
 
 Produce your output as valid JSON with this exact structure:
 {
@@ -84,8 +32,7 @@ Produce your output as valid JSON with this exact structure:
       {
         "insurer": "string",
         "role": "Current Policy or New Quote",
-        "monthlyPremium": "string - formatted amount",
-        "annualPremium": "string - formatted amount or N/A"
+        "monthlyPremium": "string - formatted amount"
       }
     ],
     "difference": "string - plain language description of cost difference vs current policy (or between quotes if no current policy)",
@@ -118,7 +65,7 @@ Produce your output as valid JSON with this exact structure:
         "values": { "insurerName": "string - excess amount" }
       }
     ],
-    "analysis": "string - professional analysis of excess structures"
+    "analysis": "string - 1-2 sentences on the most significant excess difference only"
   },
   "shortfalls": {
     "gapsInCurrentCover": [
@@ -126,7 +73,7 @@ Produce your output as valid JSON with this exact structure:
         "item": "string - cover/extension name",
         "section": "string - which policy section e.g. Contents, Motor",
         "availableIn": ["string - insurer names that offer this"],
-        "details": "string - brief explanation of what the client is missing"
+        "details": "string - one sentence: what is missing and why it matters"
       }
     ],
     "coverAtRisk": [
@@ -137,16 +84,16 @@ Produce your output as valid JSON with this exact structure:
         "newQuoteDetails": "string - what the new quote provides or does not provide"
       }
     ],
-    "analysis": "string - professional summary of shortfalls and risks"
+    "analysis": "string - 1-2 sentences on the most critical shortfall or risk only"
   },
   "conditionsDifferences": {
     "insurers": {
       "insurerName": ["string - important condition points"]
     },
-    "analysis": "string - professional analysis of conditions"
+    "analysis": "string - 1-2 sentences on the most important conditions difference only"
   },
-  "recommendation": "string - detailed professional recommendation with reasoning. If comparing against a current policy, reference it explicitly. Include scenarios for different client priorities (cost vs risk). Be balanced and compliant.",
-  "emailDraft": "string - a complete, professional email ready to send to the client. Use the following strict formatting rules: (1) HEADINGS: ALL CAPS for section headings, e.g. PREMIUM COMPARISON, MOTOR COVER COMPARISON. (2) DIVIDERS: a line of dashes (----------) between major sections. (3) BULLETS: a dash followed by a space (- ) for bullet points. (4) TABLES: for ALL comparative or side-by-side data, you MUST use markdown pipe tables with a header separator row, for example: | Insurer | Role | Monthly Premium | followed by |---------|------|------------------| followed by data rows. Use tables for: the premium comparison (columns: Insurer, Role, Monthly Premium), each cover section comparison (columns: Feature, then one column per insurer), and the excess comparison (columns: Insurer, Section, Excess). (5) Blank lines between every section. Include: greeting (Dear [Client Name]), premium comparison table, per-section cover comparison table(s), excess comparison table, shortfalls summary, recommendation, and professional closing. The email must be comprehensive enough to serve as the record of advice."
+  "recommendation": "string - 3-5 sentences MAX. Give a clear, decisive verdict: which option is best and why. Briefly note 1-2 trade-offs for alternatives. Do not repeat premium figures or cover details already in the tables.",
+  "emailDraft": "string - The actual email the broker sends to their client. This is the PRIMARY deliverable — it must read like a personal, conversational message from a knowledgeable broker, NOT a system-generated report.\\n\\nTONE RULES:\\n- Write as the broker speaking directly to their client in first person.\\n- Greeting: 'Hi [Client Name],' followed by a warm opener like 'I trust that you are well.' — never 'Dear [Client Name],'.\\n- Conversational but professional throughout. No legalese, no jargon, no filler phrases like 'warrants your careful consideration'.\\n- Sign off with something like 'Let me know what you think or if you\\'d like to discuss this in more detail.' then 'Kind regards,' — NO titles, taglines, or 'Expert South African Insurance Broker Analyst' after the name.\\n\\nSTRUCTURE (follow this order exactly):\\n\\n1. GREETING + CONTEXT: 'Hi [Name],' + warm opener + ONE sentence explaining what was compared and which cover categories are included (e.g. 'I\\'ve compared your current insurance with the alternative options, focusing on your premium, vehicle, and household contents cover.').\\n\\n2. MONTHLY PREMIUM COMPARISON: Use a ## heading. Create a markdown pipe table with columns: Option | Monthly Premium. Use short friendly insurer names (not full legal entity names). For the current policy, format as 'Current ([ShortName])'. Order rows cheapest first. Follow the table with ONE sentence noting the cheapest option and the saving (e.g. 'Hybrid offers the most competitive premium, with a meaningful saving compared to your current cover.'). Currency format: R1,203 (no space after R, drop .00 decimals).\\n\\n3. COVER COMPARISON PER CATEGORY: For EACH coverage category present (e.g. Vehicle Cover, Household Contents, Buildings), create a SEPARATE ## headed section with its OWN markdown pipe table. Columns: Feature | Insurer1 | Insurer2 | etc. Only include features with MATERIAL differences between insurers — skip features that are identical across all options. Use short, client-friendly feature names. After each table, add ONE sentence highlighting the most notable difference. If a specific sub-topic within a category has enough nuance to warrant its own section (2+ rows of meaningful variation across insurers, e.g. Power Surge behaviour under loadshedding, Geyser Cover specifics), break it out into its own ### mini-section with its own table.\\n\\n4. KEY POINTS TO CONSIDER: Use a ## heading. List per-insurer bullet points. For EACH insurer, use **InsurerName:** as a bold label followed by 3-5 concise bullet points listing BOTH pros AND cons. Every insurer must have at least one pro and one con. Keep each bullet to one line.\\n\\n5. RECOMMENDATION: Use a ## heading. Maximum 2-3 sentences. One sentence for the recommendation, one for the primary reason, one deferring to the client (e.g. 'but we can proceed in whichever way you prefer'). Do NOT repeat the full analysis or premium figures. Do NOT use catastrophizing language like 'exposing you to considerable financial risks'.\\n\\n6. CLOSING: A warm close like 'Let me know what you think, have any questions, or if you\\'d like to discuss this in more detail.' then 'Kind regards,'\\n\\nFORMATTING RULES:\\n- Use ## for section headings in title case (e.g. '## Monthly Premium Comparison') — NOT ALL CAPS with dash dividers.\\n- Use markdown pipe tables with header separator rows for ALL tabular data.\\n- Use - for bullet points.\\n- Currency: R1,203 format (no space after R, no unnecessary .00).\\n- Use short/friendly insurer names throughout, not full legal entity names (e.g. 'ONE Insurance' not 'ONE Insurance Limited T/A ONE')."
 }
 
 IMPORTANT:
@@ -160,11 +107,34 @@ IMPORTANT:
 Here is the extracted data from the documents:
 `;
 
+const RENEWAL_EMAIL_BOILERPLATE = `We have pleasure in enclosing your Renewal due on: {RENEWAL_DATE}
+
+As your broker, we aim to ensure that your policy cover remains suitable for your needs and circumstances. At renewal we review the information currently recorded on your policy; however, we rely on you to inform us of any changes to your circumstances, assets, or insurance requirements that may affect your cover. Please read through all the documentation to ensure that you are familiar with the details regarding your cover, including the cover exclusions, and to confirm that the information noted on your policy schedule is correct, as your premium is based thereon. Incorrect information may invalidate cover or prejudice future claims. Please advise on any changes or amendments that need to be made.
+
+Please familiarise yourself with any updated excesses payable in the event of a loss. The policy wording provides the terms, conditions and cover applicable to your policy and must be read together with the policy schedule. Please note that an annual renewal constitutes a new contract of insurance, and all warranties, endorsements and conditions noted on the renewal schedule will apply from the renewal date.
+
+Main reasons why premiums may change at renewal include:
+- 10% increase in insured values on various sections covered (excluding the motor section).
+- Vehicle sum insured updated to the current retail value.
+- Increase in costs associated with vehicle repairs.
+- Any claims and/or non-payment of premiums during the last 12 months.
+- Changes in risk factors which may influence your risk profile.`;
+
 const RENEWAL_PROMPT = `You are an expert South African insurance broker analyst. You have been provided with extracted data from TWO documents for the same client:
 - [PREVIOUS SCHEDULE] — the client's policy from the prior period (last year's schedule)
 - [RENEWAL QUOTE] — the insurer's renewal terms for the upcoming period
 
-Your task is to identify EVERY change between the previous schedule and the renewal quote. Focus entirely on what has changed — do not simply describe what stays the same.
+Your task is to:
+1. Identify EVERY change between the previous schedule and the renewal quote. Focus entirely on what has changed — do not simply describe what stays the same.
+2. Review the RENEWAL QUOTE against a standard broker checklist and flag which optional covers are NOT currently on the policy.
+
+CRITICAL STYLE RULES — apply to ALL text fields in the JSON output:
+- Be CONCISE. Summarise — do not enumerate every detail in prose.
+- Use short, direct sentences. Avoid filler, preamble, and repetition.
+- Each "details" field must be 1 sentence MAX.
+- The "recommendation" must be 3-5 sentences MAX — decisive, not an essay.
+- The "emailDraft" must follow the exact structure described below.
+- Never repeat information already shown in tables within prose sections.
 
 Produce your output as valid JSON with this exact structure:
 {
@@ -226,9 +196,56 @@ Produce your output as valid JSON with this exact structure:
       "renewed": "string"
     }
   ],
-  "recommendation": "string - professional recommendation for the broker. Comment on whether the renewal represents good value, flag any concerns (significant excess increases, removed cover, large premium hike), and suggest any action items.",
-  "emailDraft": "string - a complete, professional email to the client summarising the renewal changes. Use the following strict formatting rules: (1) HEADINGS: ALL CAPS for section headings, e.g. PREMIUM CHANGE, COVER CHANGES. (2) DIVIDERS: a line of dashes (----------) between major sections. (3) BULLETS: a dash followed by a space (- ) for bullet points. (4) TABLES: for ALL comparative or side-by-side data, you MUST use markdown pipe tables with a header separator row. Use a table for the premium change (columns: | | Previous | Renewed | Change |), a table for excess changes (columns: Section | Item | Previous | Renewed), and a table for cover changes (columns: Item | Section | Previous | Renewed). (5) Blank lines between every section. Include: greeting (Dear [Client Name]), premium change table, excess changes table (if any), cover changes table (if any), any concerns or recommendations, and professional closing."
+  "renewalChecklist": [
+    {
+      "section": "string - e.g. Buildings, Contents, Motor, All Risk",
+      "item": "string - the cover or detail being checked, e.g. Solar Panels/PV System, Car Hire, Regular Driver",
+      "status": "covered or not_covered or verify",
+      "currentValue": "string or null - current limit, detail, or value if covered (e.g. 'R50,000 limit', '2 geysers', 'John Smith')",
+      "recommendation": "string - 1 sentence action for the client, e.g. 'Please confirm that any solar panels at your property are declared on the policy.'"
+    }
+  ],
+  "recommendation": "string - 3-5 sentences MAX. State whether the renewal is fair value, flag the 1-2 biggest concerns, and suggest clear action items. Do not repeat figures already in the tables.",
+  "emailDraft": "string - a professional renewal email. IMPORTANT: The email MUST follow this exact structure:\\n\\nPART 1 — GREETING AND STANDARD NOTICE (always include):\\nStart with 'Dear {CLIENT_NAME},' then include the following standard renewal boilerplate VERBATIM (replace {RENEWAL_DATE} with the actual renewal effective date from the documents):\\n\\n${RENEWAL_EMAIL_BOILERPLATE}\\n\\nPART 2 — RENEWAL ANALYSIS:\\nAfter the standard text, add a section headed 'RENEWAL SUMMARY' with:\\n- A premium change table (| | Previous | Renewed | Change |)\\n- ONE combined key changes table for the 5-8 most material excess, sum insured, and cover changes (columns: Item | Previous | Renewed | Impact)\\n- 2-3 bullet point concerns\\n\\nPART 3 — COVER REVIEW RECOMMENDATIONS:\\nAdd a section headed 'COVER REVIEW' with: 'As part of your policy renewal, please review your policy schedule to ensure that all information and cover amounts remain accurate and suitable for your needs. The points below highlight covers and policy details that are either not currently selected on your policy or that we recommend you verify:'\\nThen for EACH renewalChecklist item with status 'not_covered' or 'verify', include a bullet point grouped by section. Examples:\\n- 'Your Buildings section does not currently include Solar Panels/PV System cover. If you have installed solar panels, please let us know so we can add this to your policy.'\\n- 'Please ensure that the regular driver noted on your Motor section is correct.'\\nOnly include sections that exist on the client's policy. If ALL checklist items are 'covered', write: 'Based on our review, your policy covers all standard items. Please still review the schedule to ensure all details are accurate.'\\n\\nPART 4 — CLOSING:\\nEnd with: 'Should you wish to update any information, adjust sums insured, or add any of the covers mentioned above, please let us know so that we can amend your policy accordingly.\\n\\nIf we do not hear from you, we will proceed with the renewal based on the current information and cover as reflected on your policy schedule.'\\nThen a professional sign-off.\\n\\nFORMATTING RULES: (1) HEADINGS: ALL CAPS. (2) DIVIDERS: dashes (----------) between sections. (3) TABLES: markdown pipe tables with header separator rows. (4) BULLETS: dash + space."
 }
+
+RENEWAL CHECKLIST INSTRUCTIONS:
+Review the RENEWAL QUOTE data for the following items and populate the renewalChecklist array. Only include checklist items for sections that exist on the policy.
+
+For Buildings sections:
+- Solar Panels/PV System: Is solar panel cover declared? (not_covered if absent or not mentioned)
+- Inverter/Battery System: Is inverter or battery cover declared? (not_covered if absent or not mentioned)
+- Solar Geyser: Is a solar geyser declared? (not_covered if absent or not mentioned)
+- Geyser Count: Is the number of geysers stated? (verify — ask client to confirm count is correct)
+- Power Surge Cover: Is power surge included as an extension?
+- Accidental Damage Cover: Is accidental damage included as an extension?
+- Power Surge Protection Clause: Is a surge protection warranty/clause noted? (verify — client should take note)
+
+For Contents sections:
+- Power Surge Cover: Is power surge included as an extension?
+- Accidental Damage Cover: Is accidental damage included as an extension?
+- Security Measures: Are security measures stated in conditions? (verify — ask client to confirm they are accurate)
+- Contents Sum Insured: Is the total contents value adequate? (verify — recommend client use a contents inventory to check)
+
+For Motor sections (check per vehicle if multiple):
+- Car Hire/Loss of Use: Is car hire cover included?
+- Credit Shortfall: Is credit shortfall cover included?
+- Tyre and Rim Cover: Is tyre and rim cover included?
+- Scratch and Dent Cover: Is scratch and dent cover included?
+- Roadside Assistance: Is roadside assistance included?
+- Regular Driver: Is the regular driver noted? (verify — ask client to confirm it is correct)
+- Parking Address: Are daytime and nighttime parking addresses stated? (verify — ask client to confirm they are correct)
+- Vehicle Excess: Note the excess applicable. (verify — ask client to take note of excess payable)
+- Vehicle Extras/Accessories: Are extras listed? (not_covered if none declared — remind client that towbars, bullbars, spotlights, etc. must be listed to be insured)
+
+For All Risk / Specified Items sections:
+- Specified Items List: Is the list of specified items present? (verify — ask client to ensure list is up to date)
+- Replacement Values: Are replacement values stated for each item? (verify — ask client to review and ensure values are correct)
+
+STATUS RULES:
+- "covered": The item is explicitly included with a limit or value on the renewal quote.
+- "not_covered": The item is absent, excluded, nil, or has "No Cover" on the renewal quote. These are the most important flags.
+- "verify": The item is present but the client should confirm the details are still accurate (e.g. regular driver name, parking address, geyser count, contents value).
 
 IMPORTANT:
 - If there are NO changes in a category (e.g. no cover was removed), return an empty array for that field.
@@ -271,61 +288,60 @@ async function generateWithRetry(
   }
 }
 
-// Shared helper: fetch files, upload to Gemini, poll until ACTIVE
-async function uploadAndActivateFiles(
-  ai: GoogleGenAI,
-  documents: Array<{
-    _id: string;
-    fileName: string;
-    storageId: string;
-    mimeType?: string;
-    insurerName?: string;
-    documentRole?: string;
-  }>,
-  ctx: { storage: { getUrl: (id: string) => Promise<string | null> } }
-) {
-  const uploadedFiles = await Promise.all(
-    documents.map(async (doc) => {
-      const fileUrl = await ctx.storage.getUrl(doc.storageId as Parameters<typeof ctx.storage.getUrl>[0]);
-      if (!fileUrl) throw new Error(`Could not get URL for file: ${doc.fileName}`);
+/**
+ * Filter extracted data sections by selected category types.
+ * Premium metadata is always included.
+ */
+function filterBySelectedCategories(
+  extractedData: Record<string, unknown>,
+  selectedCategories: string[]
+): Record<string, unknown> {
+  const sections = (extractedData.sections ?? []) as Array<Record<string, unknown>>;
+  const filteredSections = sections.filter((section) => {
+    const sectionType = (section.sectionType as string) ?? "other";
+    return selectedCategories.includes(sectionType);
+  });
 
-      const response = await fetch(fileUrl);
-      const arrayBuffer = await response.arrayBuffer();
-      const mimeType = doc.mimeType ?? "application/pdf";
-
-      const blob = new Blob([arrayBuffer], { type: mimeType });
-      const geminiFile = await ai.files.upload({
-        file: blob,
-        config: { mimeType },
-      });
-
-      return { doc, geminiFile };
-    })
-  );
-
-  const activeFiles = await Promise.all(
-    uploadedFiles.map(async ({ doc, geminiFile }) => {
-      let file = geminiFile;
-      let attempts = 0;
-      while (file.state === "PROCESSING" && attempts < 15) {
-        await new Promise((r) => setTimeout(r, 2000));
-        file = await ai.files.get({ name: file.name! });
-        attempts++;
-      }
-      if (file.state !== "ACTIVE") {
-        throw new Error(`File failed to become ready: ${doc.fileName}`);
-      }
-      return { doc, geminiFile: file };
-    })
-  );
-
-  return activeFiles;
+  return {
+    ...extractedData,
+    sections: filteredSections,
+  };
 }
+
+/**
+ * Build the extractedDataArray from documents, filtering sections by selected categories.
+ */
+function buildExtractedPayload(
+  documents: Array<{
+    fileName: string;
+    documentRole?: string;
+    insurerName?: string;
+    extractedData?: unknown;
+  }>,
+  selectedCategories: string[],
+  roleMapping: Record<string, string>
+) {
+  return documents
+    .filter((doc) => doc.extractedData)
+    .map((doc) => {
+      const raw = doc.extractedData as Record<string, unknown>;
+      const filtered = filterBySelectedCategories(raw, selectedCategories);
+
+      const role =
+        roleMapping[doc.documentRole ?? "new_quote"] ?? "NEW QUOTE";
+      return { fileName: doc.fileName, role, data: filtered };
+    });
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Stage 2: Comparison synthesis (uses pre-extracted data from Stage 1)
+// ──────────────────────────────────────────────────────────────────
 
 export const processQuotes = action({
   args: {
     comparisonId: v.id("comparisons"),
     contactName: v.string(),
+    selectedCategories: v.array(v.string()),
   },
   handler: async (ctx, args) => {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -345,63 +361,30 @@ export const processQuotes = action({
         status: "processing",
       });
 
+      // Persist selected categories
+      await ctx.runMutation(api.comparisons.storeSelectedCategories, {
+        id: args.comparisonId,
+        selectedCategories: args.selectedCategories,
+      });
+
       const documents = await ctx.runQuery(api.documents.listByComparison, {
         comparisonId: args.comparisonId,
       });
 
-      // Fetch the comparison record to check for a custom prompt
       const comparison = await ctx.runQuery(api.comparisons.get, {
         id: args.comparisonId,
       });
 
-      const newQuotes = documents.filter((d) => d.documentRole !== "current_policy");
-      const currentPolicy = documents.find((d) => d.documentRole === "current_policy");
-
-      if (newQuotes.length < 1 || (!currentPolicy && documents.length < 2)) {
-        throw new Error(
-          "Upload at least 2 new quotes, or 1 current policy schedule + 1 new quote"
-        );
-      }
-
-      const activeFiles = await uploadAndActivateFiles(ai, documents, ctx);
-
-      // Phase 3: Extract data from all documents in parallel using file URIs.
-      const extractedDataArray = await Promise.all(
-        activeFiles.map(async ({ doc, geminiFile }) => {
-          const extractionResult = (await generateWithRetry(() =>
-            ai.models.generateContent({
-              model: "gemini-2.0-flash",
-              contents: createUserContent([
-                EXTRACTION_PROMPT,
-                createPartFromUri(geminiFile.uri!, geminiFile.mimeType!),
-              ]),
-              config: {
-                responseMimeType: "application/json",
-                maxOutputTokens: 65536,
-              },
-            })
-          )) as { text: string };
-
-          const jsonSource =
-            extractionResult.text.match(/\{[\s\S]*\}/)?.[0] ?? extractionResult.text;
-          if (!jsonSource.trim()) {
-            throw new Error(`Failed to extract data from ${doc.fileName}`);
-          }
-
-          const data = safeJsonParse(jsonSource, `extraction of ${doc.fileName}`);
-
-          // Prefer broker-supplied insurer name over AI-extracted name
-          if (doc.insurerName) {
-            (data as any).insurerName = doc.insurerName;
-          }
-
-          const role =
-            doc.documentRole === "current_policy" ? "CURRENT POLICY" : "NEW QUOTE";
-          return { fileName: doc.fileName, role, data };
-        })
+      const extractedDataArray = buildExtractedPayload(
+        documents,
+        args.selectedCategories,
+        { current_policy: "CURRENT POLICY", new_quote: "NEW QUOTE" }
       );
 
-      // Phase 4: Generate comparison from structured extracted data.
+      if (extractedDataArray.length < 1) {
+        throw new Error("No extracted data found — run extraction first");
+      }
+
       const customPromptBlock = comparison?.customPrompt
         ? `\n\nPRIORITY INSTRUCTION FROM THE BROKER (treat this as the most important guidance for the analysis):\n${comparison.customPrompt}\n`
         : "";
@@ -416,7 +399,7 @@ export const processQuotes = action({
 
       const comparisonResult = (await generateWithRetry(() =>
         ai.models.generateContent({
-          model: "gemini-2.0-flash",
+          model: GEMINI_MODEL,
           contents: [{ role: "user", parts: [{ text: comparisonInput }] }],
           config: {
             responseMimeType: "application/json",
@@ -425,14 +408,16 @@ export const processQuotes = action({
         })
       )) as { text: string };
 
-      const comparisonJsonSource =
-        comparisonResult.text.match(/\{[\s\S]*\}/)?.[0] ?? comparisonResult.text;
+      const comparisonJsonSource = extractJsonObject(comparisonResult.text);
       if (!comparisonJsonSource.trim()) {
         throw new Error("Failed to generate comparison");
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = safeJsonParse(comparisonJsonSource, "comparison generation") as any;
+      const result = safeJsonParse(
+        comparisonJsonSource,
+        "comparison generation"
+      ) as any;
 
       await ctx.runMutation(api.comparisons.storeResult, {
         id: args.comparisonId,
@@ -448,13 +433,6 @@ export const processQuotes = action({
         },
       });
 
-      // Phase 5: Clean up uploaded files from Gemini.
-      await Promise.allSettled(
-        activeFiles.map(({ geminiFile }) =>
-          ai.files.delete({ name: geminiFile.name! })
-        )
-      );
-
       return { success: true };
     } catch (error) {
       console.error("Processing failed:", error);
@@ -467,10 +445,15 @@ export const processQuotes = action({
   },
 });
 
+// ──────────────────────────────────────────────────────────────────
+// Stage 2: Renewal synthesis (uses pre-extracted data from Stage 1)
+// ──────────────────────────────────────────────────────────────────
+
 export const processRenewal = action({
   args: {
     comparisonId: v.id("comparisons"),
     contactName: v.string(),
+    selectedCategories: v.array(v.string()),
   },
   handler: async (ctx, args) => {
     const apiKey = process.env.GEMINI_API_KEY;
@@ -490,11 +473,15 @@ export const processRenewal = action({
         status: "processing",
       });
 
+      await ctx.runMutation(api.comparisons.storeSelectedCategories, {
+        id: args.comparisonId,
+        selectedCategories: args.selectedCategories,
+      });
+
       const documents = await ctx.runQuery(api.documents.listByComparison, {
         comparisonId: args.comparisonId,
       });
 
-      // Fetch the comparison record to check for a custom prompt
       const comparison = await ctx.runQuery(api.comparisons.get, {
         id: args.comparisonId,
       });
@@ -505,40 +492,17 @@ export const processRenewal = action({
         );
       }
 
-      const activeFiles = await uploadAndActivateFiles(ai, documents, ctx);
-
-      // Extract both documents
-      const extractedDataArray = await Promise.all(
-        activeFiles.map(async ({ doc, geminiFile }) => {
-          const extractionResult = (await generateWithRetry(() =>
-            ai.models.generateContent({
-              model: "gemini-2.0-flash",
-              contents: createUserContent([
-                EXTRACTION_PROMPT,
-                createPartFromUri(geminiFile.uri!, geminiFile.mimeType!),
-              ]),
-              config: { responseMimeType: "application/json" },
-            })
-          )) as { text: string };
-
-          const jsonSource =
-            extractionResult.text.match(/\{[\s\S]*\}/)?.[0] ?? extractionResult.text;
-          if (!jsonSource.trim()) {
-            throw new Error(`Failed to extract data from ${doc.fileName}`);
-          }
-
-          const data = safeJsonParse(jsonSource, `extraction of ${doc.fileName}`);
-
-          if (doc.insurerName) {
-            (data as any).insurerName = doc.insurerName;
-          }
-
-          // current_policy = previous schedule, new_quote = renewal quote
-          const role =
-            doc.documentRole === "current_policy" ? "PREVIOUS SCHEDULE" : "RENEWAL QUOTE";
-          return { fileName: doc.fileName, role, data };
-        })
+      const extractedDataArray = buildExtractedPayload(
+        documents,
+        args.selectedCategories,
+        { current_policy: "PREVIOUS SCHEDULE", new_quote: "RENEWAL QUOTE" }
       );
+
+      if (extractedDataArray.length < 2) {
+        throw new Error(
+          "Both documents must be extracted before generating renewal analysis"
+        );
+      }
 
       const customPromptBlock = comparison?.customPrompt
         ? `\n\nPRIORITY INSTRUCTION FROM THE BROKER (treat this as the most important guidance for the analysis):\n${comparison.customPrompt}\n`
@@ -554,7 +518,7 @@ export const processRenewal = action({
 
       const renewalResult = (await generateWithRetry(() =>
         ai.models.generateContent({
-          model: "gemini-2.0-flash",
+          model: GEMINI_MODEL,
           contents: [{ role: "user", parts: [{ text: renewalInput }] }],
           config: {
             responseMimeType: "application/json",
@@ -563,14 +527,16 @@ export const processRenewal = action({
         })
       )) as { text: string };
 
-      const renewalJsonSource =
-        renewalResult.text.match(/\{[\s\S]*\}/)?.[0] ?? renewalResult.text;
+      const renewalJsonSource = extractJsonObject(renewalResult.text);
       if (!renewalJsonSource.trim()) {
         throw new Error("Failed to generate renewal analysis");
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = safeJsonParse(renewalJsonSource, "renewal analysis") as any;
+      const result = safeJsonParse(
+        renewalJsonSource,
+        "renewal analysis"
+      ) as any;
 
       await ctx.runMutation(api.comparisons.storeResult, {
         id: args.comparisonId,
@@ -585,12 +551,6 @@ export const processRenewal = action({
           emailDraft: result.emailDraft || "",
         },
       });
-
-      await Promise.allSettled(
-        activeFiles.map(({ geminiFile }) =>
-          ai.files.delete({ name: geminiFile.name! })
-        )
-      );
 
       return { success: true };
     } catch (error) {

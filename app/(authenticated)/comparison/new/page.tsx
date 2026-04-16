@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useCallback, useEffect, Suspense } from "react";
+import { useState, useCallback, useEffect, useMemo, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useMutation, useAction, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
 import { ContactSelector } from "@/components/contact-selector";
 import { FileUpload } from "@/components/file-upload";
+import { ExtractionView } from "@/components/extraction-view";
+import { CategorySelector } from "@/components/category-selector";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,20 +57,39 @@ function NewComparisonContent() {
   const [currentPolicyReady, setCurrentPolicyReady] = useState(false);
   const [newQuotesReady, setNewQuotesReady] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
   const [initialized, setInitialized] = useState(!resumeId);
 
   const createComparison = useMutation(api.comparisons.create);
+  const extractDocuments = useAction(api.extractDocuments.extractDocuments);
   const processQuotes = useAction(api.processQuotes.processQuotes);
+  const resetToExtracted = useMutation(api.comparisons.resetToExtracted);
+  const updateStatus = useMutation(api.comparisons.updateStatus);
 
   const existingComparison = useQuery(
     api.comparisons.get,
-    resumeId ? { id: resumeId } : "skip"
+    comparisonId ? { id: comparisonId } : "skip"
   );
 
   const existingDocs = useQuery(
     api.documents.listByComparison,
     comparisonId ? { comparisonId } : "skip"
   );
+
+  // Determine current step from comparison status
+  const comparisonStatus = existingComparison?.status;
+
+  // Redirect to detail page once processing/completed/failed
+  useEffect(() => {
+    if (
+      comparisonId &&
+      (comparisonStatus === "processing" ||
+        comparisonStatus === "completed" ||
+        comparisonStatus === "failed")
+    ) {
+      router.replace(`/comparison/${comparisonId}`);
+    }
+  }, [comparisonId, comparisonStatus, router]);
 
   useEffect(() => {
     if (existingComparison && !initialized) {
@@ -139,14 +160,33 @@ function NewComparisonContent() {
     [existingDocs]
   );
 
-  const handleProcess = async () => {
-    if (!comparisonId || !contact) return;
+  // Start extraction (Stage 1)
+  const handleExtract = async () => {
+    if (!comparisonId) return;
+    setIsExtracting(true);
+    try {
+      await extractDocuments({ comparisonId });
+    } catch {
+      toast.error("Extraction failed. Please try again.");
+      setIsExtracting(false);
+    }
+  };
 
+  // Go back to upload step from extraction/extracted state
+  const handleBackToUpload = async () => {
+    if (!comparisonId) return;
+    await updateStatus({ id: comparisonId, status: "uploading" });
+  };
+
+  // Generate comparison (Stage 2)
+  const handleGenerate = async (selectedCategories: string[]) => {
+    if (!comparisonId || !contact) return;
     setIsProcessing(true);
     try {
       await processQuotes({
         comparisonId,
         contactName: contact.name,
+        selectedCategories,
       });
       toast.success("Processing complete!");
       router.push(`/comparison/${comparisonId}`);
@@ -168,7 +208,41 @@ function NewComparisonContent() {
     (d) => d.documentRole !== "current_policy"
   );
 
-  const canGenerate = newQuotesReady;
+  const canExtract = newQuotesReady;
+  const statusIsExtracting = comparisonStatus === "extracting";
+  const statusIsExtracted = comparisonStatus === "extracted";
+  const showUpload = !comparisonStatus || comparisonStatus === "uploading";
+  const showExtraction = statusIsExtracting;
+  const showCategories = statusIsExtracted;
+
+  // Build extracted document data for category selector
+  const extractedDocuments = useMemo(() => {
+    if (!existingDocs) return [];
+    return existingDocs
+      .filter((d) => d.extractedData)
+      .map((d) => {
+        const data = d.extractedData as Record<string, unknown>;
+        return {
+          fileName: d.fileName,
+          insurerName: (data.insurerName as string) || d.insurerName,
+          documentRole: d.documentRole,
+          sections: (data.sections ?? []) as Array<{
+            sectionName: string;
+            sectionType: string;
+            insuredItem?: string;
+            pointCount?: number;
+            extensions?: Array<Record<string, unknown>>;
+            inclusions?: string[];
+            exclusions?: string[];
+            specialConditions?: string[];
+          }>,
+          totalPremium: data.totalPremium as {
+            monthly?: number | null;
+            annual?: number | null;
+          } | undefined,
+        };
+      });
+  }, [existingDocs]);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -192,7 +266,7 @@ function NewComparisonContent() {
       {/* Two-panel layout: details contracts left, uploads slide in right */}
       <div className="flex flex-col md:flex-row gap-6 items-start">
 
-        {/* ── Step 1: Details panel ─────────────────────────────────────────── */}
+        {/* -- Step 1: Details panel ---------------------------------------- */}
         <div
           className={cn(
             "shrink-0 transition-[width] duration-500 ease-in-out",
@@ -282,119 +356,158 @@ function NewComparisonContent() {
           </Card>
         </div>
 
-        {/* ── Steps 2-4: Upload + Generate — slide in from the right ────────── */}
+        {/* -- Steps 2-5: Upload + Extract + Categories + Generate ---------- */}
         {comparisonId && (
           <div className="flex-1 min-w-0 space-y-6 animate-in slide-in-from-right-8 fade-in duration-500">
 
-            {/* Step 2: Current Policy */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-base">2. Current Policy Schedule</CardTitle>
-                    <CardDescription className="mt-1">
-                      Upload the client&apos;s existing policy schedule. This enables the AI to identify shortfalls and compare accurately against the new quotes.
-                    </CardDescription>
-                  </div>
-                  <Badge variant="secondary" className="shrink-0 ml-2">Optional</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {existingCurrentPolicy ? (
-                  <DocumentRow
-                    id={existingCurrentPolicy._id}
-                    fileName={existingCurrentPolicy.fileName}
-                    onRemoved={() => setCurrentPolicyReady(false)}
-                  />
-                ) : (
-                  <FileUpload
-                    comparisonId={comparisonId}
-                    onFilesReady={handleCurrentPolicyReady}
-                    role="current_policy"
-                    maxFiles={1}
-                    label="Drag and drop the current policy schedule here"
-                    hint="or click to browse. PDF or image accepted. One file only."
-                  />
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Step 3: New Quotes */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-base">3. New Quote(s)</CardTitle>
-                    <CardDescription className="mt-1">
-                      Upload one or more new insurance quotes to compare. At least one quote is required.
-                    </CardDescription>
-                  </div>
-                  <Badge variant="outline" className="shrink-0 ml-2">Required</Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {existingNewQuotes && existingNewQuotes.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground font-medium">Uploaded quotes</p>
-                    {existingNewQuotes.map((doc) => (
-                      <DocumentRow
-                        key={doc._id}
-                        id={doc._id}
-                        fileName={doc.fileName}
-                        insurerName={doc.insurerName}
-                        showInsurerName
-                        onRemoved={() => {
-                          if ((existingNewQuotes?.length ?? 0) <= 1) {
-                            setNewQuotesReady(false);
-                          }
-                        }}
-                      />
-                    ))}
-                  </div>
-                )}
-                <FileUpload
-                  comparisonId={comparisonId}
-                  onFilesReady={handleNewQuotesReady}
-                  role="new_quote"
-                  label="Drag and drop new quote files here"
-                  hint="or click to browse. PDFs and images accepted. Upload as many quotes as needed."
-                />
-                {!newQuotesReady && (
-                  <p className="text-xs text-muted-foreground">
-                    Upload at least 1 new quote to proceed.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Step 4: Generate */}
-            {canGenerate && (
+            {/* Step 2: Current Policy (visible during upload) */}
+            {showUpload && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">4. Generate Comparison</CardTitle>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-base">2. Current Policy Schedule</CardTitle>
+                      <CardDescription className="mt-1">
+                        Upload the client&apos;s existing policy schedule. This enables the AI to identify shortfalls and compare accurately against the new quotes.
+                      </CardDescription>
+                    </div>
+                    <Badge variant="secondary" className="shrink-0 ml-2">Optional</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {existingCurrentPolicy ? (
+                    <DocumentRow
+                      id={existingCurrentPolicy._id}
+                      fileName={existingCurrentPolicy.fileName}
+                      onRemoved={() => setCurrentPolicyReady(false)}
+                    />
+                  ) : (
+                    <FileUpload
+                      comparisonId={comparisonId}
+                      onFilesReady={handleCurrentPolicyReady}
+                      role="current_policy"
+                      maxFiles={1}
+                      label="Drag and drop the current policy schedule here"
+                      hint="or click to browse. PDF or image accepted. One file only."
+                    />
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Step 3: New Quotes (visible during upload) */}
+            {showUpload && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-base">3. New Quote(s)</CardTitle>
+                      <CardDescription className="mt-1">
+                        Upload one or more new insurance quotes to compare. At least one quote is required.
+                      </CardDescription>
+                    </div>
+                    <Badge variant="outline" className="shrink-0 ml-2">Required</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {existingNewQuotes && existingNewQuotes.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground font-medium">Uploaded quotes</p>
+                      {existingNewQuotes.map((doc) => (
+                        <DocumentRow
+                          key={doc._id}
+                          id={doc._id}
+                          fileName={doc.fileName}
+                          insurerName={doc.insurerName}
+                          showInsurerName
+                          onRemoved={() => {
+                            if ((existingNewQuotes?.length ?? 0) <= 1) {
+                              setNewQuotesReady(false);
+                            }
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  <FileUpload
+                    comparisonId={comparisonId}
+                    onFilesReady={handleNewQuotesReady}
+                    role="new_quote"
+                    label="Drag and drop new quote files here"
+                    hint="or click to browse. PDFs and images accepted. Upload as many quotes as needed."
+                  />
+                  {!newQuotesReady && (
+                    <p className="text-xs text-muted-foreground">
+                      Upload at least 1 new quote to proceed.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Step 4: Extract Data (button or progress) */}
+            {showUpload && canExtract && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">4. Extract Data</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <p className="text-sm text-muted-foreground mb-4">
                     {currentPolicyReady
-                      ? "AI will extract data from all documents and generate a professional comparison, including shortfall analysis against the current policy."
-                      : "AI will extract data from all quotes and generate a professional side-by-side comparison. For shortfall analysis, also upload the current policy above."}
+                      ? "AI will scan all documents using OCR and extract structured insurance data for review before generating the comparison."
+                      : "AI will scan all quotes using OCR and extract structured data for review. For shortfall analysis, also upload the current policy above."}
                   </p>
                   <Button
-                    onClick={handleProcess}
-                    disabled={isProcessing}
+                    onClick={handleExtract}
+                    disabled={isExtracting}
                     className="w-full gap-2"
                   >
-                    {isProcessing ? (
+                    {isExtracting ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Processing Documents...
+                        Starting Extraction...
                       </>
                     ) : (
-                      "Generate Comparison"
+                      "Extract Data from Documents"
                     )}
                   </Button>
                 </CardContent>
               </Card>
+            )}
+
+            {/* Extraction in progress */}
+            {showExtraction && existingDocs && (
+              <>
+                <ExtractionView documents={existingDocs} />
+                <p className="text-xs text-muted-foreground text-center">
+                  Extracting data from {existingDocs.length} document{existingDocs.length !== 1 ? "s" : ""}. This usually takes 30-60 seconds per document.
+                </p>
+              </>
+            )}
+
+            {/* Category selection + generate */}
+            {showCategories && (
+              <>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleBackToUpload}
+                    className="text-xs"
+                  >
+                    <ArrowLeft className="h-3 w-3 mr-1" />
+                    Back to Upload
+                  </Button>
+                </div>
+
+                <CategorySelector
+                  documents={extractedDocuments}
+                  initialSelected={existingComparison?.selectedCategories ?? undefined}
+                  onConfirm={handleGenerate}
+                  isGenerating={isProcessing}
+                  generateLabel="Generate Comparison"
+                />
+              </>
             )}
           </div>
         )}

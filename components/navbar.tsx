@@ -6,6 +6,7 @@ import { UserButton, useUser } from "@clerk/nextjs";
 import {
   BarChart3,
   Users,
+  UsersRound,
   LayoutDashboard,
   Plus,
   RefreshCw,
@@ -28,6 +29,7 @@ import { cn } from "@/lib/utils";
 const navigation = [
   { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { name: "Contacts", href: "/contacts", icon: Users },
+  { name: "Team", href: "/team", icon: UsersRound },
 ];
 
 export function Navbar() {

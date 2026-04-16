@@ -16,6 +16,7 @@ import {
   ShieldAlert,
   Maximize2,
   Minimize2,
+  Share2,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -24,11 +25,12 @@ type PanelId = "comparisons" | "renewals" | "claims";
 
 export default function DashboardPage() {
   const [expanded, setExpanded] = useState<PanelId | null>(null);
-  const [activeTab, setActiveTab] = useState<PanelId>("comparisons");
+  const [activeTab, setActiveTab] = useState<PanelId | "shared">("comparisons");
 
   const comparisons = useQuery(api.comparisons.list);
   const contacts = useQuery(api.contacts.list);
   const claims = useQuery(api.claims.list);
+  const sharedWithMe = useQuery(api.shares.listSharedWithMe);
 
   const isLoading =
     comparisons === undefined || contacts === undefined || claims === undefined;
@@ -46,6 +48,7 @@ export default function DashboardPage() {
   const totalRenewals =
     comparisons?.filter((c) => c.comparisonType === "renewal").length ?? 0;
   const totalClaims = claims?.length ?? 0;
+  const totalShared = sharedWithMe?.length ?? 0;
 
   const handleToggle = (id: PanelId) => {
     setExpanded((prev) => (prev === id ? null : id));
@@ -163,7 +166,7 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Stats ──────────────────────────────────────────────────────────── */}
-      <div className="grid gap-4 sm:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-5">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -216,7 +219,52 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Shared with Me
+            </CardTitle>
+            <Share2 className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {sharedWithMe === undefined ? "—" : totalShared}
+            </div>
+          </CardContent>
+        </Card>
       </div>
+
+      {/* ── Shared with me section (desktop) ─────────────────────────────── */}
+      {totalShared > 0 && (
+        <div className="hidden md:block">
+          <div className="flex items-center gap-2 mb-3">
+            <Share2 className="h-4 w-4 text-primary" />
+            <h2 className="text-sm font-semibold">Shared with Me</h2>
+            <Badge variant="secondary" className="text-xs">
+              {totalShared}
+            </Badge>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {sharedWithMe?.map((item) => {
+              if (!item) return null;
+              return (
+                <ComparisonCard
+                  key={item._id}
+                  id={item.comparison._id}
+                  title={item.comparison.title}
+                  status={item.comparison.status}
+                  insuranceType={item.comparison.insuranceType}
+                  contactName={item.contactName}
+                  createdAt={item.comparison._creationTime}
+                  comparisonType={item.comparison.comparisonType}
+                  sharedByName={item.sharedByName}
+                  permission={item.permission}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── DESKTOP: horizontal panel layout ───────────────────────────────── */}
       <div className="hidden md:flex gap-3 min-h-[520px]">
@@ -349,13 +397,18 @@ export default function DashboardPage() {
       <div className="md:hidden space-y-4">
         {/* Tab bar */}
         <div className="flex rounded-lg border overflow-hidden">
-          {panels.map((panel, idx) => {
+          {[...panels, ...(totalShared > 0 ? [{
+            id: "shared" as const,
+            title: "Shared",
+            Icon: Share2,
+            count: totalShared,
+          }] : [])].map((panel, idx) => {
             const isActive = activeTab === panel.id;
             const { Icon } = panel;
             return (
               <button
                 key={panel.id}
-                onClick={() => setActiveTab(panel.id)}
+                onClick={() => setActiveTab(panel.id as PanelId | "shared")}
                 className={cn(
                   "flex-1 flex flex-col items-center gap-1 py-3 px-2 text-xs font-medium transition-colors",
                   idx > 0 && "border-l",
@@ -380,54 +433,103 @@ export default function DashboardPage() {
         </div>
 
         {/* Active tab content */}
-        {panels.map((panel) => {
-          if (panel.id !== activeTab) return null;
-          const EmptyIcon = panel.emptyIcon;
-          return (
-            <div key={panel.id}>
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-base font-semibold">
-                  Recent {panel.title}
-                </h2>
-                <Link href={panel.newHref}>
-                  <Button variant="outline" size="sm" className="gap-2">
-                    <Plus className="h-3.5 w-3.5" />
-                    {panel.newLabel}
-                  </Button>
-                </Link>
-              </div>
-              {isLoading ? (
-                <div className="space-y-3">
-                  {[1, 2, 3].map((i) => (
-                    <Card key={i}>
-                      <CardContent className="p-4">
-                        <div className="h-10 animate-pulse bg-muted rounded" />
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              ) : panel.count === 0 ? (
-                <Card>
-                  <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                    <EmptyIcon className="h-10 w-10 text-muted-foreground mb-3" />
-                    <h3 className="text-sm font-medium">{panel.emptyTitle}</h3>
-                    <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-                      {panel.emptyDesc}
-                    </p>
-                    <Link href={panel.newHref} className="mt-4">
-                      <Button size="sm" className="gap-2">
-                        <Plus className="h-4 w-4" />
-                        {panel.newLabel}
-                      </Button>
-                    </Link>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="space-y-3">{panel.renderItems()}</div>
-              )}
+        {activeTab === "shared" ? (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-semibold">Shared with Me</h2>
             </div>
-          );
-        })}
+            {sharedWithMe === undefined ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                  <Card key={i}>
+                    <CardContent className="p-4">
+                      <div className="h-10 animate-pulse bg-muted rounded" />
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : totalShared === 0 ? (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                  <Share2 className="h-10 w-10 text-muted-foreground mb-3" />
+                  <h3 className="text-sm font-medium">Nothing shared yet</h3>
+                  <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+                    When a team member shares a comparison or renewal with you, it will appear here.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {sharedWithMe.map((item) => {
+                  if (!item) return null;
+                  return (
+                    <ComparisonCard
+                      key={item._id}
+                      id={item.comparison._id}
+                      title={item.comparison.title}
+                      status={item.comparison.status}
+                      insuranceType={item.comparison.insuranceType}
+                      contactName={item.contactName}
+                      createdAt={item.comparison._creationTime}
+                      comparisonType={item.comparison.comparisonType}
+                      sharedByName={item.sharedByName}
+                      permission={item.permission}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : (
+          panels.map((panel) => {
+            if (panel.id !== activeTab) return null;
+            const EmptyIcon = panel.emptyIcon;
+            return (
+              <div key={panel.id}>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-base font-semibold">
+                    Recent {panel.title}
+                  </h2>
+                  <Link href={panel.newHref}>
+                    <Button variant="outline" size="sm" className="gap-2">
+                      <Plus className="h-3.5 w-3.5" />
+                      {panel.newLabel}
+                    </Button>
+                  </Link>
+                </div>
+                {isLoading ? (
+                  <div className="space-y-3">
+                    {[1, 2, 3].map((i) => (
+                      <Card key={i}>
+                        <CardContent className="p-4">
+                          <div className="h-10 animate-pulse bg-muted rounded" />
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : panel.count === 0 ? (
+                  <Card>
+                    <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                      <EmptyIcon className="h-10 w-10 text-muted-foreground mb-3" />
+                      <h3 className="text-sm font-medium">{panel.emptyTitle}</h3>
+                      <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+                        {panel.emptyDesc}
+                      </p>
+                      <Link href={panel.newHref} className="mt-4">
+                        <Button size="sm" className="gap-2">
+                          <Plus className="h-4 w-4" />
+                          {panel.newLabel}
+                        </Button>
+                      </Link>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="space-y-3">{panel.renderItems()}</div>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );

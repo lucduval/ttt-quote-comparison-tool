@@ -1,8 +1,8 @@
 import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api } from "./_generated/api";
-import { GoogleGenAI } from "@google/genai";
-import { safeJsonParse } from "./lib/jsonParse";
+import Anthropic from "@anthropic-ai/sdk";
+import { safeJsonParse, extractJsonObject } from "./lib/jsonParse";
 
 async function generateWithRetry(
   fn: () => Promise<unknown>,
@@ -18,8 +18,8 @@ async function generateWithRetry(
         error instanceof Error &&
         (msg.includes("429") ||
           msg.includes("503") ||
-          msg.includes("resource exhausted") ||
-          msg.includes("too many requests") ||
+          msg.includes("overloaded") ||
+          msg.includes("rate limit") ||
           msg.includes("unavailable") ||
           msg.includes("service unavailable"));
 
@@ -42,9 +42,9 @@ export const refineOutput = action({
     userMessage: v.string(),
   },
   handler: async (ctx, args) => {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
-      throw new Error("GEMINI_API_KEY not configured");
+      throw new Error("ANTHROPIC_API_KEY not configured");
     }
 
     const comparison = await ctx.runQuery(api.comparisons.get, {
@@ -55,32 +55,37 @@ export const refineOutput = action({
       throw new Error("No result found to refine");
     }
 
-    const ai = new GoogleGenAI({ apiKey });
+    const client = new Anthropic({ apiKey });
 
     const currentResultJson = JSON.stringify(comparison.result, null, 2);
 
-    const prompt = `You are an expert South African insurance broker AI assistant. A previous AI has generated an insurance analysis, and the user wants to refine it.
+    const systemPrompt = `You are an expert South African insurance broker AI assistant. A previous AI has generated an insurance analysis, and the user wants to refine it.
 
-USER INSTRUCTION: ${args.userMessage}
+Apply the user's instruction to the analysis below. Return ONLY valid JSON in exactly the same structure as the input — do not add, remove, or rename any keys. Only change the content of the values as directed by the user.`;
 
-Apply the user's instruction to the analysis below. Return ONLY valid JSON in exactly the same structure as the input — do not add, remove, or rename any keys. Only change the content of the values as directed by the user.
+    const userPrompt = `USER INSTRUCTION: ${args.userMessage}
 
 CURRENT OUTPUT:
 ${currentResultJson}`;
 
     const response = (await generateWithRetry(() =>
-      ai.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: prompt,
-        config: { responseMimeType: "application/json" },
+      client.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 16384,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userPrompt }],
       })
-    )) as { text: string };
+    )) as Anthropic.Message;
 
-    const jsonSource =
-      response.text.match(/\{[\s\S]*\}/)?.[0] ?? response.text;
+    const textBlock = response.content.find(
+      (block) => block.type === "text"
+    );
+    const rawText = textBlock && textBlock.type === "text" ? textBlock.text : "";
+
+    const jsonSource = extractJsonObject(rawText);
 
     if (!jsonSource.trim()) {
-      throw new Error("Gemini returned an empty response");
+      throw new Error("Claude returned an empty response");
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

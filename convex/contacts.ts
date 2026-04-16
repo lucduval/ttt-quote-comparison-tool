@@ -29,7 +29,25 @@ export const get = query({
     if (!contact) throw new Error("Contact not found");
 
     if (!isAdmin(identity) && contact.userId !== identity.subject) {
-      throw new Error("Contact not found");
+      // Check if user has a share on any comparison linked to this contact
+      const comparisons = await ctx.db
+        .query("comparisons")
+        .withIndex("by_contact", (q) => q.eq("contactId", args.id))
+        .collect();
+
+      let hasAccess = false;
+      for (const comp of comparisons) {
+        const shares = await ctx.db
+          .query("shares")
+          .withIndex("by_resource", (q) => q.eq("resourceId", comp._id))
+          .collect();
+        if (shares.some((s) => s.sharedWithUserId === identity.subject)) {
+          hasAccess = true;
+          break;
+        }
+      }
+
+      if (!hasAccess) throw new Error("Contact not found");
     }
     return contact;
   },

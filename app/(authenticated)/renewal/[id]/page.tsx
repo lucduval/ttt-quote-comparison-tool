@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useQuery } from "convex/react";
+import { useQuery, useMutation } from "convex/react";
 import { useEffect } from "react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
@@ -9,8 +9,11 @@ import { RenewalResult } from "@/components/renewal-result";
 import { EmailPreview } from "@/components/email-preview";
 import { PdfExport } from "@/components/pdf-export";
 import { RefineChat } from "@/components/refine-chat";
+import { ShareDialog } from "@/components/share-dialog";
+import { ShareNoteBanner } from "@/components/share-note-banner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ArrowLeft,
@@ -18,6 +21,7 @@ import {
   AlertCircle,
   CheckCircle2,
   RefreshCw,
+  RotateCcw,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -31,9 +35,18 @@ export default function RenewalDetailPage() {
     api.contacts.get,
     comparison?.contactId ? { id: comparison.contactId } : "skip"
   );
+  const shareInfo = useQuery(api.shares.getShareForResource, {
+    resourceId: comparisonId,
+  });
+
+  const resetToExtracted = useMutation(api.comparisons.resetToExtracted);
 
   useEffect(() => {
-    if (comparison?.status === "uploading") {
+    if (
+      comparison?.status === "uploading" ||
+      comparison?.status === "extracting" ||
+      comparison?.status === "extracted"
+    ) {
       router.replace(`/renewal/new?resumeId=${comparisonId}`);
     }
   }, [comparison, comparisonId, router]);
@@ -51,10 +64,19 @@ export default function RenewalDetailPage() {
     );
   }
 
-  const isProcessing =
-    comparison.status === "processing" || comparison.status === "uploading";
+  const isProcessing = comparison.status === "processing";
   const isFailed = comparison.status === "failed";
   const isCompleted = comparison.status === "completed";
+  const isOwner = comparison._permission === "owner";
+  const canEdit =
+    comparison._permission === "owner" ||
+    comparison._permission === "admin" ||
+    comparison._permission === "edit";
+
+  const handleReAnalyze = async () => {
+    await resetToExtracted({ id: comparisonId });
+    router.push(`/renewal/new?resumeId=${comparisonId}`);
+  };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -67,6 +89,15 @@ export default function RenewalDetailPage() {
         <ArrowLeft className="h-4 w-4" />
         {contact ? `Back to ${contact.name}` : "Back to Dashboard"}
       </Link>
+
+      {/* Share note banner */}
+      {shareInfo && (
+        <ShareNoteBanner
+          sharedByName={shareInfo.sharedByName ?? "A team member"}
+          note={shareInfo.note}
+          permission={shareInfo.permission}
+        />
+      )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
@@ -111,7 +142,24 @@ export default function RenewalDetailPage() {
         </div>
         {isCompleted && comparison.result && (
           <div className="self-start sm:self-auto shrink-0 flex items-center gap-2">
-            <RefineChat comparisonId={comparisonId} />
+            {canEdit && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleReAnalyze}
+                className="gap-1.5 text-xs"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Re-analyze
+              </Button>
+            )}
+            <RefineChat comparisonId={comparisonId} disabled={!canEdit} />
+            {isOwner && (
+              <ShareDialog
+                resourceType="renewal"
+                resourceId={comparisonId}
+              />
+            )}
             {contact && (
               <PdfExport
                 title={comparison.title}
@@ -127,10 +175,10 @@ export default function RenewalDetailPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
             <Loader2 className="h-10 w-10 text-primary animate-spin mb-4" />
-            <h3 className="text-sm font-medium">Analysing renewal changes...</h3>
+            <h3 className="text-sm font-medium">Generating renewal analysis...</h3>
             <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-              AI is extracting data from both documents and identifying every change.
-              This usually takes 30–60 seconds.
+              AI is synthesizing the extracted data and identifying every change.
+              This usually takes 30-60 seconds.
             </p>
           </CardContent>
         </Card>

@@ -58,6 +58,50 @@ function repairTruncatedJson(raw: string): string {
 }
 
 /**
+ * Extract the first balanced JSON object from a string.
+ * Handles markdown code fences, trailing text, and nested braces inside strings.
+ */
+export function extractJsonObject(raw: string): string {
+  // Strip markdown code fences
+  let text = raw.replace(/^```(?:json)?\s*\n?/m, "").replace(/\n?```\s*$/m, "");
+
+  // Find the first '{'
+  const start = text.indexOf("{");
+  if (start === -1) return text.trim();
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === "\\") {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+
+  // No balanced close found — return from start to end (truncated output)
+  return text.slice(start);
+}
+
+/**
  * Parse JSON with automatic repair for truncated AI output.
  * Tries raw parse first, then attempts truncation repair.
  */

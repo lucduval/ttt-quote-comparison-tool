@@ -22,10 +22,13 @@ export default defineSchema({
     title: v.string(),
     status: v.union(
       v.literal("uploading"),
+      v.literal("extracting"),
+      v.literal("extracted"),
       v.literal("processing"),
       v.literal("completed"),
       v.literal("failed")
     ),
+    selectedCategories: v.optional(v.array(v.string())),
     insuranceType: v.optional(v.string()),
     comparisonType: v.optional(v.union(v.literal("comparison"), v.literal("renewal"))),
     customPrompt: v.optional(v.string()),
@@ -53,12 +56,51 @@ export default defineSchema({
     mimeType: v.optional(v.string()),
     insurerName: v.optional(v.string()),
     extractedData: v.optional(v.any()),
+    extractionStatus: v.optional(v.union(
+      v.literal("pending"),
+      v.literal("scanning"),
+      v.literal("analyzing"),
+      v.literal("done"),
+      v.literal("failed")
+    )),
+    ocrPageCount: v.optional(v.number()),
     documentRole: v.optional(v.union(v.literal("current_policy"), v.literal("new_quote"))),
   }).index("by_comparison", ["comparisonId"]),
 
   sessions: defineTable({
     userId: v.string(),
   }).index("by_user", ["userId"]),
+
+  teams: defineTable({
+    name: v.string(),
+    ownerId: v.string(),
+    description: v.optional(v.string()),
+  }).index("by_owner", ["ownerId"]),
+
+  teamMembers: defineTable({
+    teamId: v.id("teams"),
+    userId: v.string(),
+    userName: v.optional(v.string()),
+    userEmail: v.optional(v.string()),
+    role: v.union(v.literal("owner"), v.literal("member")),
+  })
+    .index("by_team", ["teamId"])
+    .index("by_user", ["userId"])
+    .index("by_team_user", ["teamId", "userId"]),
+
+  shares: defineTable({
+    resourceType: v.union(v.literal("comparison"), v.literal("renewal")),
+    resourceId: v.id("comparisons"),
+    sharedByUserId: v.string(),
+    sharedByName: v.optional(v.string()),
+    sharedWithUserId: v.string(),
+    sharedWithName: v.optional(v.string()),
+    permission: v.union(v.literal("view"), v.literal("edit")),
+    note: v.optional(v.string()),
+  })
+    .index("by_resource", ["resourceId"])
+    .index("by_recipient", ["sharedWithUserId"])
+    .index("by_sharer", ["sharedByUserId"]),
 
   claims: defineTable({
     userId: v.string(),

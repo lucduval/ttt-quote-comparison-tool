@@ -66,6 +66,61 @@ export const removeDocument = mutation({
   },
 });
 
+export const updateExtractionStatus = mutation({
+  args: {
+    id: v.id("documents"),
+    extractionStatus: v.union(
+      v.literal("pending"),
+      v.literal("scanning"),
+      v.literal("analyzing"),
+      v.literal("done"),
+      v.literal("failed")
+    ),
+    ocrPageCount: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const doc = await ctx.db.get(args.id);
+    if (!doc) return; // document may have been deleted
+    const patch: Record<string, unknown> = { extractionStatus: args.extractionStatus };
+    if (args.ocrPageCount !== undefined) {
+      patch.ocrPageCount = args.ocrPageCount;
+    }
+    await ctx.db.patch(args.id, patch);
+  },
+});
+
+export const storeExtractedData = mutation({
+  args: {
+    id: v.id("documents"),
+    extractedData: v.any(),
+  },
+  handler: async (ctx, args) => {
+    const doc = await ctx.db.get(args.id);
+    if (!doc) return; // document may have been deleted
+    await ctx.db.patch(args.id, {
+      extractedData: args.extractedData,
+      extractionStatus: "done",
+    });
+  },
+});
+
+export const clearExtractedData = mutation({
+  args: { comparisonId: v.id("comparisons") },
+  handler: async (ctx, args) => {
+    const docs = await ctx.db
+      .query("documents")
+      .withIndex("by_comparison", (q) => q.eq("comparisonId", args.comparisonId))
+      .collect();
+    for (const doc of docs) {
+      await ctx.db.patch(doc._id, {
+        extractedData: undefined,
+        extractionStatus: undefined,
+        ocrPageCount: undefined,
+      });
+    }
+  },
+});
+
 export const updateInsurerName = mutation({
   args: { id: v.id("documents"), insurerName: v.optional(v.string()) },
   handler: async (ctx, args) => {

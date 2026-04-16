@@ -3,22 +3,34 @@
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { FileText, Clock, CheckCircle2, AlertCircle, Loader2, RefreshCw } from "lucide-react";
+import { FileText, Clock, CheckCircle2, AlertCircle, Loader2, RefreshCw, Share2 } from "lucide-react";
 import { Id } from "@/convex/_generated/dataModel";
 
 interface ComparisonCardProps {
   id: Id<"comparisons">;
   title: string;
-  status: "uploading" | "processing" | "completed" | "failed";
+  status: "uploading" | "extracting" | "extracted" | "processing" | "completed" | "failed";
   insuranceType?: string;
   contactName?: string;
   createdAt: number;
   comparisonType?: "comparison" | "renewal";
+  sharedByName?: string;
+  permission?: "view" | "edit";
 }
 
 const statusConfig = {
   uploading: {
     label: "Uploading",
+    variant: "secondary" as const,
+    icon: Clock,
+  },
+  extracting: {
+    label: "Extracting",
+    variant: "secondary" as const,
+    icon: Loader2,
+  },
+  extracted: {
+    label: "Review",
     variant: "secondary" as const,
     icon: Clock,
   },
@@ -47,19 +59,21 @@ export function ComparisonCard({
   contactName,
   createdAt,
   comparisonType,
+  sharedByName,
+  permission,
 }: ComparisonCardProps) {
   const config = statusConfig[status];
   const StatusIcon = config.icon;
   const isRenewal = comparisonType === "renewal";
 
-  const href =
-    status === "uploading"
-      ? isRenewal
-        ? `/renewal/new?resumeId=${id}`
-        : `/comparison/new?resumeId=${id}`
-      : isRenewal
-        ? `/renewal/${id}`
-        : `/comparison/${id}`;
+  const isSetup = status === "uploading" || status === "extracting" || status === "extracted";
+  const href = isSetup
+    ? isRenewal
+      ? `/renewal/new?resumeId=${id}`
+      : `/comparison/new?resumeId=${id}`
+    : isRenewal
+      ? `/renewal/${id}`
+      : `/comparison/${id}`;
 
   const RowIcon = isRenewal ? RefreshCw : FileText;
 
@@ -81,6 +95,23 @@ export function ComparisonCard({
               </Badge>
             </div>
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
+              {sharedByName && (
+                <>
+                  <span className="inline-flex items-center gap-1 text-xs text-primary font-medium">
+                    <Share2 className="h-3 w-3" />
+                    Shared by {sharedByName}
+                  </span>
+                  {permission && (
+                    <>
+                      <span className="text-xs text-muted-foreground">·</span>
+                      <span className="text-xs text-muted-foreground capitalize">
+                        {permission === "edit" ? "Can edit" : "View only"}
+                      </span>
+                    </>
+                  )}
+                  <span className="text-xs text-muted-foreground">·</span>
+                </>
+              )}
               {contactName && (
                 <span className="text-xs text-muted-foreground truncate">
                   {contactName}

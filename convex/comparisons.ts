@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { isAdmin } from "./lib/roles";
+import { getComparisonAccess } from "./lib/permissions";
 
 export const list = query({
   args: {},
@@ -43,10 +44,12 @@ export const get = query({
     const comparison = await ctx.db.get(args.id);
     if (!comparison) throw new Error("Comparison not found");
 
-    if (!isAdmin(identity) && comparison.userId !== identity.subject) {
+    const access = await getComparisonAccess(ctx, identity, args.id);
+    if (!access.allowed) {
       throw new Error("Comparison not found");
     }
-    return comparison;
+
+    return { ...comparison, _permission: access.permission };
   },
 });
 
@@ -79,6 +82,8 @@ export const updateStatus = mutation({
     id: v.id("comparisons"),
     status: v.union(
       v.literal("uploading"),
+      v.literal("extracting"),
+      v.literal("extracted"),
       v.literal("processing"),
       v.literal("completed"),
       v.literal("failed")
@@ -86,6 +91,36 @@ export const updateStatus = mutation({
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.id, { status: args.status });
+  },
+});
+
+export const storeSelectedCategories = mutation({
+  args: {
+    id: v.id("comparisons"),
+    selectedCategories: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, { selectedCategories: args.selectedCategories });
+  },
+});
+
+export const resetToExtracted = mutation({
+  args: { id: v.id("comparisons") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+
+    const comparison = await ctx.db.get(args.id);
+    if (!comparison) throw new Error("Comparison not found");
+
+    if (!isAdmin(identity) && comparison.userId !== identity.subject) {
+      throw new Error("Comparison not found");
+    }
+
+    await ctx.db.patch(args.id, {
+      status: "extracted",
+      result: undefined,
+    });
   },
 });
 
@@ -133,6 +168,16 @@ export const remove = mutation({
     for (const doc of documents) {
       await ctx.storage.delete(doc.storageId);
       await ctx.db.delete(doc._id);
+    }
+
+    // Cascade-delete shares
+    const shares = await ctx.db
+      .query("shares")
+      .withIndex("by_resource", (q) => q.eq("resourceId", args.id))
+      .collect();
+
+    for (const share of shares) {
+      await ctx.db.delete(share._id);
     }
 
     await ctx.db.delete(args.id);
